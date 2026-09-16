@@ -6,6 +6,3 @@
 ## 必读
 
 - 行为规则 — [`.claude/rules/core-rules.md`](./.claude/rules/core-rules.md)
-- 架构契约 — [`docs/specs/`](./docs/specs/)
-- 变更规范 — [`docs/changes/`](./docs/changes/)
-

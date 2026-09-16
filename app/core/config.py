@@ -58,13 +58,24 @@ class Config:
     UPLOAD_DIR: Path = PROJECT_ROOT / os.getenv("UPLOAD_DIR", "uploads")
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
 
+    # ====== MinerU 文档解析(pipeline 后端,M4 16GB 友好)======
+    # 总开关:True 时 PDF/DOCX/PPTX 走 minerU,False 时 fallback UnstructuredReader
+    MINERU_ENABLED: bool = os.getenv("MINERU_ENABLED", "false").lower() == "true"
+    # minerU 可执行文件路径(conda 环境下避免 PATH 找不到)
+    MINERU_BIN: str = os.getenv("MINERU_BIN", "/opt/anaconda3/envs/rag/bin/mineru")
+    # 转换出来的 markdown + 图片存放目录(项目根 converted/,可查可进仓)
+    MINERU_OUTDIR: Path = PROJECT_ROOT / os.getenv("MINERU_OUTDIR", "converted")
+    # minerU 单 PDF 解析超时(秒),避免卡死
+    MINERU_TIMEOUT_S: int = int(os.getenv("MINERU_TIMEOUT_S", "600"))
+
     # 允许上传的文件后缀(白名单,避免任意文件被当作文档切分)
     ALLOWED_EXTS = {".pdf", ".md", ".markdown", ".docx", ".pptx", ".txt"}
 
     @classmethod
     def ensure_dirs(cls) -> None:
-        """确保上传目录存在。"""
+        """确保上传目录 + minerU 输出目录存在。"""
         cls.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        cls.MINERU_OUTDIR.mkdir(parents=True, exist_ok=True)
 
 
 Config.ensure_dirs()
