@@ -7,23 +7,22 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
+# Config 在 import 时就读环境变量(app/core/config.py 的类体执行 _need()),
+# 而 conftest 比 test 模块先加载,所以必须在模块级注入,fixture 里设已经晚了。
+_ENV_DEFAULTS = {
+    "MINIMAX_API_KEY": "test-key",
+    "MINIMAX_GROUP_ID": "test-group",
+    "MILVUS_URI": "http://localhost:19530",
+    "EMBEDDING_DIM": "1536",
+}
+for _k, _v in _ENV_DEFAULTS.items():
+    os.environ.setdefault(_k, _v)
 
-
-@pytest.fixture(autouse=True)
-def _mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """自动给所有测试注入假环境变量,防止 Config 初始化崩。"""
-    env = {
-        "MINIMAX_API_KEY": "test-key",
-        "MINIMAX_GROUP_ID": "test-group",
-        "MILVUS_URI": "http://localhost:19530",
-        "EMBEDDING_DIM": "1536",
-    }
-    for k, v in env.items():
-        monkeypatch.setenv(k, v)
+import pytest  # noqa: E402
 
 
 class FakeLLMClient:
