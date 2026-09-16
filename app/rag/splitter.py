@@ -6,13 +6,11 @@
 """
 from __future__ import annotations
 
-from typing import List
-
 from llama_index.core import Document
 from llama_index.core.node_parser import MarkdownNodeParser
 
 
-def split(docs: List[Document]) -> List:
+def split(docs: list[Document]) -> list:
     parser = MarkdownNodeParser()
     nodes = parser.get_nodes_from_documents(documents=docs, show_progress=False)
     print(f"[splitter] 切出 {len(nodes)} 个 Node")

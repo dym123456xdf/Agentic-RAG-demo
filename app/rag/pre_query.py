@@ -9,11 +9,9 @@
 """
 from __future__ import annotations
 
-from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 
 from app.core.llm import LLMClient
-
 
 INTENT_LABELS = ["factual", "explanatory", "comparison", "creative", "chitchat"]
 HISTORY_WINDOW = 3  # 最近 3 轮足够覆盖上下文指代
@@ -23,17 +21,17 @@ HISTORY_WINDOW = 3  # 最近 3 轮足够覆盖上下文指代
 class ProcessedQuery:
     original: str
     rewritten: str
-    expanded: List[str] = field(default_factory=list)
+    expanded: list[str] = field(default_factory=list)
     intent: str = "factual"
 
 
 class QueryPreProcessor:
     """调用一次 LLM 不划算,所以一次 prompt 把三件事都问完。"""
 
-    def __init__(self, llm: Optional[LLMClient] = None):
+    def __init__(self, llm: LLMClient | None = None):
         self._llm = llm or LLMClient()
 
-    def process(self, query: str, history: Optional[List[Dict[str, str]]] = None) -> ProcessedQuery:
+    def process(self, query: str, history: list[dict[str, str]] | None = None) -> ProcessedQuery:
         history = history or []
         recent = history[-HISTORY_WINDOW * 2:]  # user+assistant 算一对
 
@@ -49,7 +47,7 @@ class QueryPreProcessor:
         )
 
     # -------- 改写 --------
-    def _rewrite(self, query: str, history: List[Dict[str, str]]) -> str:
+    def _rewrite(self, query: str, history: list[dict[str, str]]) -> str:
         if not history:
             return query
         hist_text = "\n".join(f"{m['role']}: {m['content']}" for m in history)
@@ -75,7 +73,7 @@ class QueryPreProcessor:
         return out if out in INTENT_LABELS else "factual"
 
     # -------- 扩展 --------
-    def _expand(self, query: str) -> List[str]:
+    def _expand(self, query: str) -> list[str]:
         prompt = (
             "你是查询扩展助手。围绕用户问题生成 3 个语义相关但表述不同的扩展问题,"
             "用来提升检索召回。每行一个问题,不要编号,不要解释。\n\n"

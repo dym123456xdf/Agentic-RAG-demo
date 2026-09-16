@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import List
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.core.config import Config
 from app.core.milvus_client import get_store
@@ -35,7 +34,7 @@ def get_pipeline() -> RAGPipeline:
 
 
 @router.post("/files")
-async def upload_files(files: List[UploadFile] = File(...)):
+async def upload_files(files: list[UploadFile] = File(...)):  # noqa: B008
     """前端一次拖多个文件过来,落到 uploads/,入库。
 
     幂等:同名文件已存在直接跳过,只入库新文件。
@@ -43,14 +42,14 @@ async def upload_files(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(400, "没收到文件")
 
-    saved: List[str] = []
+    saved: list[str] = []
     for f in files:
         ext = Path(f.filename or "").suffix.lower()
         if ext not in Config.ALLOWED_EXTS:
             raise HTTPException(400, f"不支持的文件格式: {ext}({f.filename})")
 
         # 防路径穿越:只用文件名,不接收子目录路径
-        safe_name = Path(f.filename).name
+        safe_name = Path(f.filename or "unnamed").name
         target = Config.UPLOAD_DIR / safe_name
         # 重复上传直接覆盖(后面入库时按文件名去重)
         with target.open("wb") as out:

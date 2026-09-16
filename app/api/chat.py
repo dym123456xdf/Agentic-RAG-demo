@@ -4,8 +4,6 @@
 """
 from __future__ import annotations
 
-from typing import List, Dict, Optional
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -21,7 +19,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
-    history: Optional[List[ChatMessage]] = None
+    history: list[ChatMessage] | None = None
 
 
 class SourceItem(BaseModel):
@@ -33,8 +31,8 @@ class SourceItem(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    sources: List[SourceItem]
-    meta: Dict
+    sources: list[SourceItem]
+    meta: dict
 
 
 @router.post("", response_model=ChatResponse)

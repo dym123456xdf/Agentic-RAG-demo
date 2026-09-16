@@ -6,8 +6,6 @@
 """
 from __future__ import annotations
 
-from typing import List
-
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.schema import NodeWithScore
 
@@ -33,14 +31,15 @@ class Retriever:
                 llm=self._llm._llm,        # 显式注入,避免 fallback OpenAI
                 similarity_top_k=Config.TOP_K,
                 num_queries=num_queries,
-                mode="reciprocal_rerank",
+                mode="reciprocal_rerank",  # type: ignore[arg-type]
                 use_async=False,
             )
 
-    def retrieve(self, processed: ProcessedQuery) -> List[NodeWithScore]:
+    def retrieve(self, processed: ProcessedQuery) -> list[NodeWithScore]:
         # 拿改写后的 query + 扩展 query,共 num 条
         queries = [processed.rewritten] + processed.expanded
         self._ensure_fuser(num_queries=len(queries))
+        assert self._fuser is not None
         nodes = self._fuser.retrieve(processed.original)  # fuser 内部会自己再扩,我们传 original 即可
         # 如果 fuser 没召回够(扩展不足),用 rewritten 再补一次单条召回
         if len(nodes) < Config.TOP_K:

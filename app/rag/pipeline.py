@@ -5,13 +5,13 @@ pre_query → retriever → post → generator
 """
 from __future__ import annotations
 
-from typing import List, Dict, Optional
+from typing import cast
 
-from app.rag.pre_query import QueryPreProcessor
-from app.rag.retriever import Retriever
-from app.rag.post import PostProcessor
 from app.rag.generator import Generator
 from app.rag.indexer import build_from_path
+from app.rag.post import PostProcessor
+from app.rag.pre_query import QueryPreProcessor
+from app.rag.retriever import Retriever
 
 
 class RAGPipeline:
@@ -23,7 +23,7 @@ class RAGPipeline:
         self._post = PostProcessor()
         self._generator = Generator()
 
-    def query(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> Dict:
+    def query(self, question: str, history: list[dict[str, str]] | None = None) -> dict:
         # 1. 预处理
         processed = self._pre.process(question, history)
         # 2. 召回
@@ -31,7 +31,7 @@ class RAGPipeline:
         # 3. 后处理
         top_nodes = self._post.process(raw_nodes, processed.rewritten)
         # 4. 生成
-        result = self._generator.generate(processed.rewritten, top_nodes)
+        result: dict = self._generator.generate(processed.rewritten, top_nodes)
         # 5. 附上预处理细节,方便前端调试
         result["meta"] = {
             "intent": processed.intent,
@@ -42,6 +42,6 @@ class RAGPipeline:
         }
         return result
 
-    def ingest(self, path: str) -> Dict:
+    def ingest(self, path: str) -> dict:
         """入库入口,方便路由直接调。"""
-        return build_from_path(path)
+        return cast(dict, build_from_path(path))

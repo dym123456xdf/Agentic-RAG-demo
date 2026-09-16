@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-rag-demo"
+version = "0.1.0"
+description = "端到端模块化 RAG 流水线（查询预处理 → 向量召回 → 重排 → 答案生成）"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "pymilvus>=2.4.0",
+    "llama-index>=0.10.0",
+    "llama-index-vector-stores-milvus>=0.1.0",
+    "llama-index-readers-file>=0.1.0",
+    "llama-index-llms-openai-like>=0.1.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+rerank = [
+    "sentence-transformers>=2.2.0",
+    "torch>=2.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.25.0",
+    "ruff>=0.4.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.5.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+# ---------- pytest ----------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "unit: 纯单元测试（不依赖外部服务）",
+    "integration: 集成测试（可能需要 Milvus / LLM）",
+]
+
+# ---------- ruff ----------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# ---------- mypy ----------
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false  # 渐进式，不一步到位
+ignore_missing_imports = true  # llama-index 等三方库没有 stub

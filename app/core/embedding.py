@@ -7,9 +7,6 @@
 """
 from __future__ import annotations
 
-import os
-from typing import List, Optional
-
 import requests
 from llama_index.core.embeddings import BaseEmbedding
 
@@ -21,10 +18,10 @@ class MiniMaxEmbedding(BaseEmbedding):
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        group_id: Optional[str] = None,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        group_id: str | None = None,
         timeout: int = 60,
     ):
         # embed_batch_size 是 BaseEmbedding 要求的入参,这里给 10,平衡吞吐和超时
@@ -41,7 +38,7 @@ class MiniMaxEmbedding(BaseEmbedding):
         self._timeout = timeout
 
     # ============== MiniMax 私有协议 ==============
-    def _call(self, texts: List[str], type_: str) -> List[List[float]]:
+    def _call(self, texts: list[str], type_: str) -> list[list[float]]:
         """type_ = "db" 用于入库,"query" 用于检索。两套编码空间,混用会召回率暴跌。"""
         resp = requests.post(
             self._url,
@@ -57,20 +54,21 @@ class MiniMaxEmbedding(BaseEmbedding):
         body = resp.json()
         if body.get("base_resp", {}).get("status_code", 0) != 0:
             raise RuntimeError(f"embedding 调用失败: {body}")
-        return body["vectors"]
+        vectors: list[list[float]] = body["vectors"]
+        return vectors
 
     # ============== BaseEmbedding 必须实现的钩子 ==============
-    def _get_query_embedding(self, query: str) -> List[float]:
+    def _get_query_embedding(self, query: str) -> list[float]:
         """检索时用,type=query。"""
         return self._call([query], type_="query")[0]
 
-    def _get_text_embedding(self, text: str) -> List[float]:
+    def _get_text_embedding(self, text: str) -> list[float]:
         """入库时用,type=db。"""
         return self._call([text], type_="db")[0]
 
     # async 钩子 —— llama-index 在某些路径会异步调用,这里直接走同步实现(够用)
-    async def _aget_query_embedding(self, query: str) -> List[float]:
+    async def _aget_query_embedding(self, query: str) -> list[float]:
         return self._get_query_embedding(query)
 
-    async def _aget_text_embedding(self, text: str) -> List[float]:
+    async def _aget_text_embedding(self, text: str) -> list[float]:
         return self._get_text_embedding(text)

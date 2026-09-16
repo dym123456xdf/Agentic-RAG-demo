@@ -12,9 +12,8 @@
 from __future__ import annotations
 
 import hashlib
-from typing import List
 
-from llama_index.core import VectorStoreIndex, StorageContext, Settings, Document
+from llama_index.core import Document, Settings, StorageContext, VectorStoreIndex
 
 from app.core.config import Config
 from app.core.embedding import MiniMaxEmbedding
@@ -47,7 +46,7 @@ def build_from_path(path: str) -> dict:
     # 查重:按文件名(source 字段)过滤已存在的文档
     existing = store.list_sources()  # {filename: chunk_count}
     new_docs = []
-    skipped_files: List[str] = []
+    skipped_files: list[str] = []
     for d in docs:
         src = d.metadata.get("source", "")
         if src in existing:
@@ -79,7 +78,7 @@ def build_from_path(path: str) -> dict:
         n.metadata["doc_id"] = _doc_id_for(n)
 
     storage_ctx = StorageContext.from_defaults(vector_store=store.vector_store)
-    index = VectorStoreIndex.from_documents(
+    VectorStoreIndex.from_documents(
         [Document(text=n.get_content(), metadata=n.metadata) for n in nodes],
         storage_context=storage_ctx,
         show_progress=True,

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional, List, Dict
 
 from llama_index.core.llms import ChatMessage
 from llama_index.llms.openai_like import OpenAILike
@@ -28,7 +27,7 @@ def strip_thinking(text: str) -> str:
 class LLMClient:
     """MiniMax M3 对话客户端。所有 chat 调用都走这里,方便换模型时只动一个文件。"""
 
-    def __init__(self, model: Optional[str] = None, timeout: int = 120):
+    def __init__(self, model: str | None = None, timeout: int = 120):
         self._llm = OpenAILike(
             model=model or Config.LLM_MODEL,
             api_key=Config.MINIMAX_API_KEY,
@@ -37,7 +36,7 @@ class LLMClient:
             timeout=timeout,
         )
 
-    def chat(self, messages: List[Dict[str, str]], temperature: float = 0.3, max_tokens: int = 1024) -> str:
+    def chat(self, messages: list[dict[str, str]], temperature: float = 0.3, max_tokens: int = 1024) -> str:
         """messages: [{"role": "system|user|assistant", "content": "..."}]"""
         chat_msgs = [ChatMessage(role=m["role"], content=m["content"]) for m in messages]
         resp = self._llm.chat(chat_msgs, temperature=temperature, max_tokens=max_tokens)

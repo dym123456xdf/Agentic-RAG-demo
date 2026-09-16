@@ -9,12 +9,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Union
 
 from llama_index.core import Document
 
 from app.core.config import Config
-
 
 SUPPORTED = {".pdf", ".md", ".markdown", ".docx", ".pptx", ".txt"}
 
@@ -23,7 +21,7 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
-def _load_one(path: Path) -> List[Document]:
+def _load_one(path: Path) -> list[Document]:
     """根据后缀选择加载器,返回 Document 列表(可能多个,看 PDF 页数)。"""
     suffix = path.suffix.lower()
     if suffix not in Config.ALLOWED_EXTS:
@@ -40,14 +38,14 @@ def _load_one(path: Path) -> List[Document]:
     from llama_index.readers.file.unstructured import UnstructuredReader as UR2  # noqa: F401
 
     reader = UnstructuredReader()
-    docs = reader.load_data(file=str(path), split_documents=False)
+    docs = reader.load_data(file=path, split_documents=False)
     # 强制补 metadata(不同格式下 reader 行为不一致)
     for d in docs:
         d.metadata = {**d.metadata, **meta_base}
     return docs
 
 
-def load(path: Union[str, Path]) -> List[Document]:
+def load(path: str | Path) -> list[Document]:
     """入口:接受文件或目录。"""
     p = Path(path)
     if not p.exists():

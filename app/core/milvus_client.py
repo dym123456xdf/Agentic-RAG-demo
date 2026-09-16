@@ -7,9 +7,7 @@
 """
 from __future__ import annotations
 
-from typing import Optional
-
-from pymilvus import connections, MilvusClient
+from pymilvus import MilvusClient
 
 from app.core.config import Config
 
@@ -60,7 +58,7 @@ class MilvusStore:
     def has_collection(self) -> bool:
         """collection 是否已存在(还没入库过任何文件时是 False)。"""
         try:
-            return self._client.has_collection(Config.MILVUS_COLLECTION)
+            return bool(self._client.has_collection(Config.MILVUS_COLLECTION))
         except Exception:
             return False
 
@@ -88,7 +86,7 @@ class MilvusStore:
         return counts
 
 
-_singleton: Optional[MilvusStore] = None
+_singleton: MilvusStore | None = None
 
 
 def get_store() -> MilvusStore:

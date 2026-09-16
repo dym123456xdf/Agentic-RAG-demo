@@ -8,15 +8,12 @@ BGE 模型加载较慢(~13s 冷启),用模块级 lazy 单例,只在第一次调�
 """
 from __future__ import annotations
 
-from typing import List
-
 from llama_index.core.schema import NodeWithScore
 from sentence_transformers import CrossEncoder
 
 from app.core.config import Config
 
-
-_BGE = None
+_BGE: CrossEncoder | None = None
 
 
 def _get_reranker() -> CrossEncoder:
@@ -26,7 +23,8 @@ def _get_reranker() -> CrossEncoder:
         import torch
         device = "mps" if torch.backends.mps.is_available() else "cpu"
         _BGE = CrossEncoder(Config.RERANK_MODEL, device=device)
-    return _BGE
+    assert _BGE is not None
+    return _BGE  # type: ignore[no-any-return]
 
 
 class PostProcessor:
@@ -37,7 +35,7 @@ class PostProcessor:
         self._top_n = Config.RERANK_TOP_N
         self._cutoff = Config.SIMILARITY_CUTOFF  # 留口子:distance 大于 cutoff 直接砍
 
-    def process(self, nodes: List[NodeWithScore], query: str) -> List[NodeWithScore]:
+    def process(self, nodes: list[NodeWithScore], query: str) -> list[NodeWithScore]:
         if not nodes:
             return nodes
 
@@ -50,8 +48,8 @@ class PostProcessor:
         reranker = _get_reranker()
         pairs = [(query, n.node.get_content()) for n in filtered]
         scores = reranker.predict(pairs, show_progress_bar=False)
-        for n, s in zip(filtered, scores):
+        for n, s in zip(filtered, scores, strict=False):
             n.score = float(s)
 
-        filtered.sort(key=lambda x: x.score, reverse=True)
+        filtered.sort(key=lambda x: x.score or 0.0, reverse=True)
         return filtered[: self._top_n]

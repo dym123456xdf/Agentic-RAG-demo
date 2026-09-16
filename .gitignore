@@ -6,3 +6,9 @@ __pycache__/
 uploads/
 static/cache/
 .DS_Store
+converted/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/

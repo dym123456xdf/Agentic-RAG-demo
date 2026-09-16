@@ -11,8 +11,6 @@
 """
 from __future__ import annotations
 
-from typing import List, Dict
-
 from llama_index.core.schema import NodeWithScore
 
 from app.core.llm import LLMClient
@@ -28,7 +26,7 @@ class Generator:
     def __init__(self):
         self._llm = LLMClient()
 
-    def generate(self, query: str, nodes: List[NodeWithScore]) -> Dict:
+    def generate(self, query: str, nodes: list[NodeWithScore]) -> dict:
         if not nodes:
             return {
                 "answer": "我不知道,资料里没提到。",
@@ -61,7 +59,7 @@ class Generator:
             {
                 "index": i,
                 "content": n.node.get_content().strip()[:300],
-                "score": round(float(n.score), 4),
+                "score": round(float(n.score or 0.0), 4),
                 "source": n.node.metadata.get("source", "unknown"),
             }
             for i, n in enumerate(nodes, 1)

@@ -1,0 +1,34 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Python ≥ 3.11, FastAPI, LlamaIndex, Milvus
+  Package manager: pip (pyproject.toml)
+  LLM: MiniMax-M3 (OpenAI compatible)
+  Embedding: embo-01 (MiniMax, custom adapter)
+  Vector store: Milvus standalone (Docker)
+  Reranker: BAAI/bge-reranker-v2-m3 (local MPS/CPU)
+
+  Product language:
+  - Write OpenSpec proposals and specs in user-facing product behavior language
+  - Requirements should describe observable behavior and product contract
+  - Avoid implementation-negative SHALL statements when a positive user outcome can express the same rule
+  - Put internal mechanisms in design.md or tasks.md unless the mechanism is itself part of the user-facing contract
+
+  Project conventions:
+  - RAG pipeline is 5-stage: pre_query → retriever → post → generator (+ indexer for ingestion)
+  - Each stage is independently testable and replaceable
+  - External dependencies (LLM, Milvus, Embedding) must be mockable in tests
+  - All configuration comes from app/core/config.py (reads .env)
+  - Chinese comments and documentation are the norm
+
+rules:
+  specs:
+    - Requirements describe user-facing behavior, not implementation details
+    - Include concrete scenarios with WHEN/THEN/GIVEN format
+    - Test coverage is mandatory for new capabilities
+  tasks:
+    - Every task that changes behavior must include a test task
+    - Mark tasks [x] only after verification passes
+  design:
+    - Document tradeoffs and alternatives considered
+    - Keep external dependency interfaces behind adapters
