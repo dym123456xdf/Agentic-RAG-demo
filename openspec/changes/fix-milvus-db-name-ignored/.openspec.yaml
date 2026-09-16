@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-16
+# Path A 实施时把这一行删掉,并在 specs/storage/spec.md 写 ## ADDED Requirements
+# Path B 不需要 delta(配置项移除不算"能力变化"),保留此 flag
+skip_specs: true
