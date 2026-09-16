@@ -24,7 +24,8 @@ SYSTEM = (
 
 class Generator:
     def __init__(self):
-        self._llm = LLMClient()
+        # 生成质量优先,走 main 档(与预处理 fast 档分层)
+        self._llm = LLMClient(role="main")
 
     def generate(self, query: str, nodes: list[NodeWithScore]) -> dict:
         if not nodes:

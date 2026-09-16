@@ -25,10 +25,14 @@ def strip_thinking(text: str) -> str:
 
 
 class LLMClient:
-    """对话客户端。凭据按 Config.LLM_PROVIDER 切换(minimax / glm),换模型只动 .env。"""
+    """对话客户端。凭据按 Config.LLM_PROVIDER 切换(minimax / glm),换模型只动 .env。
 
-    def __init__(self, model: str | None = None, timeout: int = 120):
-        cred = Config.llm_credentials()
+    role 双档位:minimax 下两档同模型;glm 下 main=GLM_MODEL(生成),
+    fast=GLM_FAST_MODEL(预处理,默认免费档 glm-4.7-flash)。
+    """
+
+    def __init__(self, model: str | None = None, role: str = "main", timeout: int = 120):
+        cred = Config.llm_credentials(role=role)
         self._llm = OpenAILike(
             model=model or cred["model"],
             api_key=cred["api_key"],

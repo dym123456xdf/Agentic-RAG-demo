@@ -1,9 +1,11 @@
-"""MiniMax embedding 适配器 —— 单一职责:把文本转成 1536 维向量。
+"""Embedding 适配器 —— 单一职责:按 EMBEDDING_PROVIDER 把文本转成向量。
 
-为什么不能直接用 OpenAILikeEmbedding:
-- MiniMax 的 /v1/embeddings 协议跟 OpenAI 不兼容:请求体用 texts/type,响应体用 vectors[],GroupId 必须走 URL query。
-- 直接用 OpenAI 风格封装会静默返回空向量,数据进了 Milvus 但全是 0,检索永远召回 0 条。
-- 这一个文件把这层差异封死,上游一切代码不需要知道 MiniMax 的怪协议。
+- MiniMaxEmbedding:embo-01,私有协议(请求体 texts/type,响应体 vectors[],GroupId 走 URL query),
+  封死差异,上游无感知。
+- ZhipuEmbedding:Embedding-3,OpenAI 兼容 /embeddings,dimensions 可选 256/512/1024/2048(默认 1024)。
+- get_embedding():唯一入口,按 Config.EMBEDDING_PROVIDER 分发;上游(indexer)不感知具体实现。
+
+注意:切换 provider = 更换向量空间,必须清空 Milvus collection 重建。
 """
 from __future__ import annotations
 
@@ -72,3 +74,74 @@ class MiniMaxEmbedding(BaseEmbedding):
 
     async def _aget_text_embedding(self, text: str) -> list[float]:
         return self._get_text_embedding(text)
+
+
+class ZhipuEmbedding(BaseEmbedding):
+    """智谱 Embedding-3 适配器(OpenAI 兼容协议,自定义维度)。
+
+    API:POST {GLM_BASE_URL}/embeddings,请求体 {model, input[], dimensions},
+    响应体 {"data": [{"embedding": [...]}]} —— 与 OpenAI /v1/embeddings 同构。
+    复用 GLM_API_KEY / GLM_BASE_URL,与对话模型同一套凭据。
+    """
+
+    def __init__(
+        self,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: int = 60,
+    ):
+        if not (api_key or Config.GLM_API_KEY):
+            raise RuntimeError(
+                "EMBEDDING_PROVIDER=glm 需要配置 GLM_API_KEY(智谱开放平台或 Z.ai 的 API Key,"
+                "见项目根 .env)。"
+            )
+        super().__init__(model_name=model_name or Config.EMBEDDING_MODEL, embed_batch_size=10)
+        self._api_key = api_key or Config.GLM_API_KEY
+        self._url = (base_url or Config.GLM_BASE_URL).rstrip("/") + "/embeddings"
+        self._timeout = timeout
+
+    def _call(self, texts: list[str]) -> list[list[float]]:
+        resp = requests.post(
+            self._url,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.model_name,
+                "input": texts,
+                "dimensions": Config.EMBEDDING_DIM,
+            },
+            timeout=self._timeout,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get("error"):
+            raise RuntimeError(f"embedding 调用失败: {body['error']}")
+        vectors: list[list[float]] = [item["embedding"] for item in body["data"]]
+        return vectors
+
+    # ============== BaseEmbedding 必须实现的钩子 ==============
+    def _get_query_embedding(self, query: str) -> list[float]:
+        return self._call([query])[0]
+
+    def _get_text_embedding(self, text: str) -> list[float]:
+        return self._call([text])[0]
+
+    async def _aget_query_embedding(self, query: str) -> list[float]:
+        return self._get_query_embedding(query)
+
+    async def _aget_text_embedding(self, text: str) -> list[float]:
+        return self._get_text_embedding(text)
+
+
+def get_embedding() -> BaseEmbedding:
+    """按 EMBEDDING_PROVIDER 返回对应的 embedding 实例(上游唯一入口)。"""
+    if Config.EMBEDDING_PROVIDER == "minimax":
+        return MiniMaxEmbedding()
+    if Config.EMBEDDING_PROVIDER == "glm":
+        return ZhipuEmbedding()
+    raise RuntimeError(
+        f"不支持的 EMBEDDING_PROVIDER: {Config.EMBEDDING_PROVIDER}(可选 minimax / glm)"
+    )

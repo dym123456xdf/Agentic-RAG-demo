@@ -16,14 +16,14 @@ import hashlib
 from llama_index.core import Document, Settings, StorageContext, VectorStoreIndex
 
 from app.core.config import Config
-from app.core.embedding import MiniMaxEmbedding
+from app.core.embedding import get_embedding
 from app.core.milvus_client import get_store
 from app.rag import loader, splitter
 
 
 def _ensure_global_settings():
     """把 LLM/embedding 注册到 llama-index 全局 Settings,确保 index 知道怎么向量化。"""
-    Settings.embed_model = MiniMaxEmbedding()
+    Settings.embed_model = get_embedding()
 
 
 def _doc_id_for(node) -> str:

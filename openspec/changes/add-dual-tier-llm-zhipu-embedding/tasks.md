@@ -1,0 +1,11 @@
+- [x] 1.1 RED:test_llm_provider.py 增补 fast/main 双档位用例
+- [x] 1.2 RED:test_embedding_provider.py(ZhipuEmbedding 请求体 / 工厂分发 / 缺 key 快速失败)
+- [x] 1.3 RED:pre_query / retriever 默认接线 role="fast"
+- [x] 2.1 config.py:GLM_FAST_MODEL + llm_credentials(role) + EMBEDDING_PROVIDER 联动默认值
+- [x] 2.2 llm.py:LLMClient(role) 参数
+- [x] 2.3 pre_query.py / retriever.py 接线 fast 档
+- [x] 2.4 embedding.py:ZhipuEmbedding + get_embedding() 工厂
+- [x] 2.5 indexer.py:改用 get_embedding()
+- [x] 3.1 同步 .env.bak + AGENTS.md(含清库重建铁律)
+- [x] 3.2 规格增量(llm-provider 双档位 + embedding-provider 新能力)
+- [x] 3.3 make check 全绿 + 冒烟(40 passed)

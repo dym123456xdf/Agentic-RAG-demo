@@ -9,6 +9,7 @@
 - **GIVEN** .env 配置 `LLM_PROVIDER=glm` 且 `GLM_API_KEY` 非空
 - **WHEN** LLMClient 初始化
 - **THEN** 使用 GLM_BASE_URL(默认 https://open.bigmodel.cn/api/paas/v4)与 GLM_MODEL(默认 glm-4.6)
+- **THEN** 使用 GLM_BASE_URL(默认 https://open.bigmodel.cn/api/paas/v4)与 GLM_MODEL(默认 glm-5.3-flash)
 
 #### Scenario: GLM 缺 Key 快速失败
 - **GIVEN** `LLM_PROVIDER=glm` 但 `GLM_API_KEY` 为空

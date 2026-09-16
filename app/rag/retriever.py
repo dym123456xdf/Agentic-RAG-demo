@@ -19,8 +19,8 @@ class Retriever:
     def __init__(self):
         self._index = load_existing_index()
         # QueryFusionRetriever 要 LLM 帮它"生成 query 变体";不传就 fallback 到 OpenAI 默认
-        # 这里显式注入我们的 M3,封装跟 Settings 解耦
-        self._llm = LLMClient()
+        # query 变体生成属预处理,走 fast 免费档
+        self._llm = LLMClient(role="fast")
         self._fuser: QueryFusionRetriever | None = None
 
     def _ensure_fuser(self, num_queries: int):

@@ -39,13 +39,20 @@ class Config:
     # ====== GLM(智谱开放平台 / Z.ai,仅 LLM_PROVIDER=glm 时必填)======
     GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
     GLM_BASE_URL: str = os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
-    GLM_MODEL: str = os.getenv("GLM_MODEL", "glm-4.6")
+    # glm-5.3-flash:旗舰同代、1M 上下文、0.8/2.8 元每百万 token;免费档可用 glm-4.7-flash
+    GLM_MODEL: str = os.getenv("GLM_MODEL", "glm-5.3-flash")
+    # fast 档(免费):意图识别 / 改写 / 扩展等预处理短输出任务
+    GLM_FAST_MODEL: str = os.getenv("GLM_FAST_MODEL", "glm-4.7-flash")
 
     # ====== Embedding(向量入库 + 查询)======
+    # provider:minimax(embo-01,私有协议,1536 维)/ glm(Embedding-3,OpenAI 兼容,默认 1024 维)
+    # 注意:切换 provider = 更换向量空间,必须清空 Milvus collection 重建!
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "minimax").strip().lower()
     # embo-01 必填 GroupId(MiniMax 强制,丢在 URL query,不传 400)
     MINIMAX_GROUP_ID: str = _need("MINIMAX_GROUP_ID")
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "embo-01")
-    EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1536"))
+    _glm_emb = EMBEDDING_PROVIDER == "glm"
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "embedding-3" if _glm_emb else "embo-01")
+    EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1024" if _glm_emb else "1536"))
 
     # ====== Milvus ======
     MILVUS_URI: str = os.getenv("MILVUS_URI", "http://localhost:19530")
@@ -86,12 +93,16 @@ class Config:
         cls.MINERU_OUTDIR.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def llm_credentials(cls) -> dict:
-        """按 LLM_PROVIDER 返回对话模型的 (api_key, base_url, model)。
+    def llm_credentials(cls, role: str = "main") -> dict:
+        """按 LLM_PROVIDER + role 返回对话模型的 (api_key, base_url, model)。
 
-        延续快速失败哲学:provider 非法或缺 key 时启动即报错,不拖到运行时。
-        Embedding 不在此列 —— embo-01 是 MiniMax 私有协议,见 app/core/embedding.py。
+        role:main(答案生成,质量优先)/ fast(意图 / 改写 / 扩展等预处理,成本优先)。
+        glm 双档位:main=GLM_MODEL,fast=GLM_FAST_MODEL(默认免费档 glm-4.7-flash);
+        minimax 无免费档,两档同模型。
+        延续快速失败哲学:provider / role 非法或缺 key 时启动即报错,不拖到运行时。
         """
+        if role not in ("main", "fast"):
+            raise RuntimeError(f"未知的 LLM 角色: {role}(可选 main / fast)")
         if cls.LLM_PROVIDER == "minimax":
             return {
                 "api_key": cls.MINIMAX_API_KEY,
@@ -107,7 +118,7 @@ class Config:
             return {
                 "api_key": cls.GLM_API_KEY,
                 "base_url": cls.GLM_BASE_URL,
-                "model": cls.GLM_MODEL,
+                "model": cls.GLM_MODEL if role == "main" else cls.GLM_FAST_MODEL,
             }
         raise RuntimeError(f"不支持的 LLM_PROVIDER: {cls.LLM_PROVIDER}(可选 minimax / glm)")
 

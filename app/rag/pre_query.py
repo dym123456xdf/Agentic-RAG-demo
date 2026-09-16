@@ -29,7 +29,8 @@ class QueryPreProcessor:
     """调用一次 LLM 不划算,所以一次 prompt 把三件事都问完。"""
 
     def __init__(self, llm: LLMClient | None = None):
-        self._llm = llm or LLMClient()
+        # 预处理(意图 / 改写 / 扩展)都是短输出轻量任务,走 fast 免费档
+        self._llm = llm or LLMClient(role="fast")
 
     def process(self, query: str, history: list[dict[str, str]] | None = None) -> ProcessedQuery:
         history = history or []

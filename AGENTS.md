@@ -5,6 +5,8 @@
 5 段模块化 RAG 流水线:查询预处理 → 向量召回 → 重排 → 答案生成。
 FastAPI + LlamaIndex + Milvus,Python ≥ 3.11,LLM/Embedding 用 MiniMax。
 对话模型可切换:minimax(默认)/ glm(智谱),由 `LLM_PROVIDER` 决定;Embedding 固定 MiniMax embo-01(私有协议)。
+glm 下 LLM 双档位:预处理(意图/改写/扩展/retriever 变体)走 `GLM_FAST_MODEL`(默认免费 glm-4.7-flash),生成走 `GLM_MODEL`(默认 glm-5.3-flash)。
+Embedding 也可切 `EMBEDDING_PROVIDER=glm`(Embedding-3,OpenAI 兼容,默认 1024 维)。
 
 ## 常用命令
 
@@ -45,6 +47,7 @@ app/api/   FastAPI 路由。只做"收请求 → 调 pipeline → 返响应"。
 - **`Config` 在 import 时就读环境变量**:没配 key 时 `import app.core.config` 直接抛 RuntimeError。测试依赖进程启动前变量已存在——本地靠 `.env`,CI 在 workflow `env:` 注入。
 - **MilvusVectorStore 不支持切 db**:llama-index 封装固定连默认 db,`rag_kb` 库的创建/切换在 `app/core/milvus_client.py` 单独用 MilvusClient 处理。
 - **入库幂等靠文件名(source 字段)查重**:同名文件整篇跳过。改这段时注意 `stats.skipped_files` 的语义别破坏。
+- **换 Embedding = 换向量空间**:切 `EMBEDDING_PROVIDER` 后必须清空 Milvus collection 重建,新旧向量混存检索会静默劣化;EMBEDDING_DIM 默认随 provider 联动(minimax 1536 / glm 1024),显式设置了 EMBEDDING_DIM 则以显式值为准。
 
 ## 变更规则(trigger → action)
 
