@@ -25,6 +25,7 @@ make run       # 启动服务 http://127.0.0.1:8000
 1. Milvus:`docker run -d --name milvus-standalone -p 19530:19530 -p 9091:9091 milvusdb/milvus:v2.4-latest`
 2. 复制 `.env.bak` 为 `.env`,填 `MINIMAX_API_KEY` + `MINIMAX_GROUP_ID`(两者必填)
 3. 用 GLM 做对话模型:设 `LLM_PROVIDER=glm` 并填 `GLM_API_KEY`(embedding 仍走 MiniMax)
+   - ⚠️ GLM Coding Plan(个人套餐)key 必须另设 `GLM_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4`,普通端点会报 1113 "余额不足"
 
 ## 架构与模块边界
 
