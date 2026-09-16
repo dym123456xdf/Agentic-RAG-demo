@@ -69,10 +69,7 @@ Agentic-RAG-demo/
 ├── CLAUDE.md                Claude 工作唯一真相源
 ├── README.md                你正在看的
 ├── docs/
-│   └── requirements-archive.md   历史产品需求(已归档)
-├── openspec/                OpenSpec SDD 目录(变更规范)
-│   ├── AGENTS.md
-│   ├── project.md
+│   ├── requirements-archive.md   历史产品需求(已归档)
 │   ├── specs/               已部署能力规格
 │   └── changes/             进行中的变更提案
 ├── app/
@@ -90,12 +87,11 @@ Agentic-RAG-demo/
 
 任何非琐碎改动(改 app/ 下任何文件、加新接口、调整流水线结构)都从 OpenSpec 开始:
 
-1. 读 `openspec/changes/` 下相关提案,看是否已有
-2. 没有则建一个新 change:`openspec/changes/<name>/{proposal,tasks,design}.md`
-3. 改完代码,在 `openspec/changes/<name>/specs/<capability>/spec.md` 写 future-state 规格(若能力有变)
-4. 完成后用 `openspec archive` 归档(需 `npm i -g @fission-ai/openspec`)
+1. 读 `docs/changes/` 下相关提案,看是否已有
+2. 没有则建一个新 change:`docs/changes/<name>/{proposal,tasks}.md`
+3. 改完代码,在 `docs/changes/<name>/specs/<capability>/spec.md` 写 future-state 规格(若能力有变)
 
-详见 [CLAUDE.md §6](./CLAUDE.md#6-变更规范openspec)。
+详见 [CLAUDE.md](./CLAUDE.md)。
 
 ---
 
