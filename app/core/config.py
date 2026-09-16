@@ -30,9 +30,16 @@ class Config:
     """统一配置入口,所有模块从这里取参数。"""
 
     # ====== LLM(对话 / 意图 / 改写 / 答案生成)======
+    # provider 切换:minimax(默认)/ glm(智谱 / Z.ai),两者都是 OpenAI 兼容协议
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "minimax").strip().lower()
     MINIMAX_API_KEY: str = _need("MINIMAX_API_KEY")
     MINIMAX_BASE_URL: str = os.getenv("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "MiniMax-M3")
+
+    # ====== GLM(智谱开放平台 / Z.ai,仅 LLM_PROVIDER=glm 时必填)======
+    GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
+    GLM_BASE_URL: str = os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+    GLM_MODEL: str = os.getenv("GLM_MODEL", "glm-4.6")
 
     # ====== Embedding(向量入库 + 查询)======
     # embo-01 必填 GroupId(MiniMax 强制,丢在 URL query,不传 400)
@@ -77,6 +84,32 @@ class Config:
         """确保上传目录 + minerU 输出目录存在。"""
         cls.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         cls.MINERU_OUTDIR.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def llm_credentials(cls) -> dict:
+        """按 LLM_PROVIDER 返回对话模型的 (api_key, base_url, model)。
+
+        延续快速失败哲学:provider 非法或缺 key 时启动即报错,不拖到运行时。
+        Embedding 不在此列 —— embo-01 是 MiniMax 私有协议,见 app/core/embedding.py。
+        """
+        if cls.LLM_PROVIDER == "minimax":
+            return {
+                "api_key": cls.MINIMAX_API_KEY,
+                "base_url": cls.MINIMAX_BASE_URL,
+                "model": cls.LLM_MODEL,
+            }
+        if cls.LLM_PROVIDER == "glm":
+            if not cls.GLM_API_KEY:
+                raise RuntimeError(
+                    "LLM_PROVIDER=glm 需要配置 GLM_API_KEY(智谱开放平台或 Z.ai 的 API Key,"
+                    "见项目根 .env)。"
+                )
+            return {
+                "api_key": cls.GLM_API_KEY,
+                "base_url": cls.GLM_BASE_URL,
+                "model": cls.GLM_MODEL,
+            }
+        raise RuntimeError(f"不支持的 LLM_PROVIDER: {cls.LLM_PROVIDER}(可选 minimax / glm)")
 
 
 Config.ensure_dirs()

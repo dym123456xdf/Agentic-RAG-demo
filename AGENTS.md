@@ -4,6 +4,7 @@
 
 5 段模块化 RAG 流水线:查询预处理 → 向量召回 → 重排 → 答案生成。
 FastAPI + LlamaIndex + Milvus,Python ≥ 3.11,LLM/Embedding 用 MiniMax。
+对话模型可切换:minimax(默认)/ glm(智谱),由 `LLM_PROVIDER` 决定;Embedding 固定 MiniMax embo-01(私有协议)。
 
 ## 常用命令
 
@@ -21,6 +22,7 @@ make run       # 启动服务 http://127.0.0.1:8000
 
 1. Milvus:`docker run -d --name milvus-standalone -p 19530:19530 -p 9091:9091 milvusdb/milvus:v2.4-latest`
 2. 复制 `.env.bak` 为 `.env`,填 `MINIMAX_API_KEY` + `MINIMAX_GROUP_ID`(两者必填)
+3. 用 GLM 做对话模型:设 `LLM_PROVIDER=glm` 并填 `GLM_API_KEY`(embedding 仍走 MiniMax)
 
 ## 架构与模块边界
 

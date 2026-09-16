@@ -25,13 +25,14 @@ def strip_thinking(text: str) -> str:
 
 
 class LLMClient:
-    """MiniMax M3 对话客户端。所有 chat 调用都走这里,方便换模型时只动一个文件。"""
+    """对话客户端。凭据按 Config.LLM_PROVIDER 切换(minimax / glm),换模型只动 .env。"""
 
     def __init__(self, model: str | None = None, timeout: int = 120):
+        cred = Config.llm_credentials()
         self._llm = OpenAILike(
-            model=model or Config.LLM_MODEL,
-            api_key=Config.MINIMAX_API_KEY,
-            api_base=Config.MINIMAX_BASE_URL,
+            model=model or cred["model"],
+            api_key=cred["api_key"],
+            api_base=cred["base_url"],
             is_chat_model=True,
             timeout=timeout,
         )
