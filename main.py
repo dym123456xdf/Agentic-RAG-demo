@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from app.api import upload, chat
+from app.api import upload, chat, sessions
 from app.core.config import Config
 
 # 项目根 / 静态页
@@ -23,6 +23,7 @@ app = FastAPI(title="个人知识库 RAG", version="0.1.0")
 # 业务路由
 app.include_router(upload.router)
 app.include_router(chat.router)
+app.include_router(sessions.router)
 
 
 # 启动时打一行,确认服务起得来
@@ -36,6 +37,15 @@ def _startup():
 # 首页 + 静态资源
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# MinerU 转换产物(每文档一个 converted/<stem>/ 文件夹,md 与 images/ 同级)
+# 前端"查看转换结果"弹层与聊天图片渲染里 `images/xxx` 链接会被改写成绝对 URL `/converted/<stem>/images/xxx` 后由此路由服务
+if Config.MINERU_OUTDIR.exists():
+    app.mount(
+        "/converted",
+        StaticFiles(directory=str(Config.MINERU_OUTDIR)),
+        name="converted",
+    )
 
 
 @app.get("/")

@@ -13,3 +13,5 @@ converted/
 *.egg-info/
 dist/
 .claude/settings.local.json
+.ua/
+.understand-anything/

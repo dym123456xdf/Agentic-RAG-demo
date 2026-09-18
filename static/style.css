@@ -1,0 +1,125 @@
+/* 共享样式 —— index.html(聊天)与 manage.html(管理页)两页共用 */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       background: #f5f6f8; color: #2c3e50; height: 100vh; display: flex; }
+
+/* ---------- 侧边栏 ---------- */
+#sidebar { width: 280px; background: #2c3e50; color: #fff; padding: 20px;
+           display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+#sidebar h1 { font-size: 18px; }
+#sidebar h2 { font-size: 14px; opacity: .8; margin-top: 6px; }
+
+/* ---------- 通用控件 ---------- */
+.btn { background: #3498db; color: #fff; border: 0; padding: 8px 12px;
+       border-radius: 6px; cursor: pointer; font-size: 13px; }
+.btn:hover { background: #2980b9; }
+.btn.ghost { background: transparent; border: 1px solid #576574; }
+.btn.danger { background: transparent; border: 1px solid #576574; color: #e74c3c; }
+.btn.danger:hover { border-color: #e74c3c; }
+input[type=text] { background: #34495e; color: #fff; border: 1px solid #576574;
+                   padding: 8px; border-radius: 6px; font-size: 13px; }
+
+/* ---------- 上传区(管理页) ---------- */
+.drop { border: 2px dashed #576574; border-radius: 8px; padding: 18px;
+        text-align: center; cursor: pointer; transition: .2s; font-size: 13px; }
+.drop:hover, .drop.drag { background: #34495e; border-color: #fff; }
+
+/* ---------- 文件列表(管理页) ---------- */
+.file-list { list-style: none; font-size: 12px; max-height: 320px; overflow-y: auto; }
+.file-list li { display: flex; justify-content: space-between; align-items: center; padding: 5px 8px;
+                background: #34495e; border-radius: 4px; margin-bottom: 4px;
+                word-break: break-all; }
+.file-list .name { flex: 1; overflow: hidden; text-overflow: ellipsis;
+                   white-space: nowrap; }
+.file-list .chunks { color: #95a5a6; font-size: 11px; margin-left: 6px; flex-shrink: 0; }
+.file-list .view-md { color: #3498db; cursor: pointer; flex-shrink: 0; margin-left: 8px;
+                      font-size: 11px; text-decoration: underline; }
+.file-list .view-md:hover { color: #5dade2; }
+
+/* ---------- 会话列表(首页) ---------- */
+.session-list { list-style: none; font-size: 12px; max-height: 320px; overflow-y: auto; }
+.session-list li { display: flex; justify-content: space-between; align-items: center;
+                   padding: 7px 9px; background: #34495e; border-radius: 4px;
+                   margin-bottom: 4px; cursor: pointer; transition: .15s; }
+.session-list li:hover { background: #3d5567; }
+.session-list li.active { background: #3498db; }
+.session-list .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-list .del { color: #95a5a6; cursor: pointer; flex-shrink: 0; padding: 0 3px; }
+.session-list .del:hover { color: #e74c3c; }
+.session-list .empty { opacity: .6; background: transparent; cursor: default; }
+
+/* ---------- 聊天区 ---------- */
+#main { flex: 1; display: flex; flex-direction: column; }
+#chat { flex: 1; padding: 20px; overflow-y: auto; }
+.msg { max-width: 80%; padding: 12px 14px; border-radius: 10px; margin-bottom: 14px;
+       line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.msg .chat-img, .hist-item .chat-img { max-width: 100%; height: auto; display: block;
+       margin: 8px 0; border-radius: 8px; }
+.user { background: #3498db; color: #fff; margin-left: auto; }
+.bot  { background: #fff; border: 1px solid #e1e4e8; }
+.sources { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ccd; font-size: 12px; }
+.src { background: #f8f9fa; border-left: 3px solid #3498db; padding: 6px 10px;
+       margin: 6px 0; border-radius: 4px; }
+.meta { color: #888; font-size: 11px; margin-top: 6px; }
+
+/* ---------- 输入栏(首页) ---------- */
+#input-bar { padding: 14px 20px; background: #fff; border-top: 1px solid #e1e4e8;
+             display: flex; gap: 10px; }
+#q { flex: 1; padding: 10px; border: 1px solid #ccd; border-radius: 8px;
+     font-size: 14px; outline: none; }
+#send { background: #2ecc71; color: #fff; border: 0; padding: 10px 22px;
+        border-radius: 8px; cursor: pointer; font-size: 14px; }
+#send:disabled { background: #95a5a6; cursor: not-allowed; }
+
+/* ---------- 管理页 ---------- */
+#content { flex: 1; padding: 24px 32px; overflow-y: auto; }
+.tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+.tab { padding: 9px 20px; background: #e8eaed; border: 0; border-radius: 8px 8px 0 0;
+       cursor: pointer; font-size: 14px; color: #555; }
+.tab.active { background: #fff; color: #2c3e50; font-weight: 600;
+              border: 1px solid #e1e4e8; border-bottom: 0; }
+.panel { display: none; background: #fff; border: 1px solid #e1e4e8;
+         border-radius: 0 10px 10px 10px; padding: 22px; }
+.panel.active { display: block; }
+.panel h3 { font-size: 14px; margin: 18px 0 10px; }
+.panel h3:first-child { margin-top: 0; }
+.notice { background: #fef5e7; border: 1px solid #f5cba7; color: #935116;
+          border-radius: 6px; padding: 9px 13px; font-size: 12px; margin-bottom: 14px; }
+.stat { font-size: 13px; color: #666; margin-top: 12px; }
+
+/* ---------- 问答历史(管理页) ---------- */
+.history-wrap { display: flex; gap: 18px; }
+.history-sessions { width: 220px; flex-shrink: 0; }
+.history-msgs { flex: 1; min-width: 0; }
+.hist-item { border: 1px solid #e1e4e8; border-radius: 8px; padding: 12px 14px;
+             margin-bottom: 10px; background: #fafbfc; }
+.hist-item .q { font-weight: 600; margin-bottom: 6px; }
+.hist-item .a { line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.hist-item details { margin-top: 8px; font-size: 12px; }
+.hist-item summary { cursor: pointer; color: #3498db; }
+.empty-hint { color: #999; font-size: 13px; text-align: center; padding: 30px 0; }
+
+/* ---------- 转换产物弹层 ---------- */
+.md-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45);
+              z-index: 100; align-items: center; justify-content: center; }
+.md-overlay.show { display: flex; }
+.md-box { background: #fff; width: 78vw; height: 82vh; border-radius: 10px;
+          display: flex; flex-direction: column; overflow: hidden; }
+.md-box header { display: flex; justify-content: space-between; align-items: center;
+                 padding: 12px 18px; border-bottom: 1px solid #e1e4e8; font-size: 14px; }
+.md-box header .close { cursor: pointer; border: 0; background: none; font-size: 18px; color: #666; }
+.md-box pre { flex: 1; overflow: auto; padding: 18px; font-size: 12.5px;
+              line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+              background: #f8f9fa; }
+.md-box .md-render { flex: 1; overflow: auto; padding: 18px; font-size: 13px;
+              line-height: 1.7; background: #f8f9fa; white-space: pre-wrap;
+              word-break: break-word; }
+.md-box .md-render img { max-width: 100%; height: auto; display: block;
+              margin: 12px auto; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+
+/* ---------- toast ---------- */
+.toast { position: fixed; right: 20px; top: 20px; padding: 10px 14px;
+         background: #2c3e50; color: #fff; border-radius: 6px; font-size: 13px;
+         opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
+.toast.show { opacity: 1; }
+.toast.err { background: #c0392b; }

@@ -117,13 +117,17 @@ async def upload_dir(payload: dict):
 
 @router.get("/files")
 async def list_files():
-    """列出已入库的文件 + 每个文件的 chunk 数。
+    """列出已入库的文件 + 每个文件的 chunk 数 + 是否有 MinerU 转换产物。
 
-    用于侧边栏展示 + 入库前的去重判定。
+    用于管理页展示 + 入库前的去重判定。
     """
     counts = get_store().list_sources()  # {filename: chunk_count}
     files = [
-        {"name": name, "chunks": n}
+        {
+            "name": name,
+            "chunks": n,
+            "has_converted": _has_converted(name),
+        }
         for name, n in sorted(counts.items())
     ]
     total_entities = sum(counts.values())
@@ -131,4 +135,36 @@ async def list_files():
         "files": files,
         "file_count": len(files),
         "total_chunks": total_entities,
+        "mineru_enabled": Config.MINERU_ENABLED,
     }
+
+
+def _has_converted(name: str) -> bool:
+    """该入库文件是否有对应的 MinerU 转换产物(converted/<stem>/<stem>.md)。"""
+    if not Config.MINERU_ENABLED:
+        return False
+    if Path(name).suffix.lower() not in MINERU_CONVERTIBLE:
+        return False
+    return converted_md_path(Config.UPLOAD_DIR / name).exists()
+
+
+@router.get("/converted/{name}")
+async def get_converted(name: str):
+    """读取 MinerU 转换产物 Markdown,供人工核对转换质量。
+
+    入参 name 为原文件名(含后缀,如 `报告.pdf`),经 converted_md_path 定位到
+    converted/<stem>/<stem>.md。
+
+    安全:name 只取 basename 且后缀必须在 MINERU_CONVERTIBLE 白名单内;
+    产物路径由 converted_md_path 拼装(stem 不会再带分隔符),天然限定在
+    MINERU_OUTDIR 内 —— 防路径穿越。
+    """
+    safe = Path(name).name
+    if safe != name or "/" in name or "\\" in name:
+        raise HTTPException(404, "非法文件名")
+    if Path(safe).suffix.lower() not in MINERU_CONVERTIBLE:
+        raise HTTPException(404, "非法文件名")
+    target = converted_md_path(Config.UPLOAD_DIR / safe)
+    if not target.is_file():
+        raise HTTPException(404, f"转换产物不存在: {safe}")
+    return {"name": safe, "content": target.read_text(encoding="utf-8", errors="ignore")}

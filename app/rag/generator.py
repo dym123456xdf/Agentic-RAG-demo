@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from llama_index.core.schema import NodeWithScore
 
 from app.core.llm import LLMClient
@@ -19,7 +21,12 @@ SYSTEM = (
     "你是一个严谨的个人知识库助手。回答用户问题时,只能依据下方提供的【参考资料】;"
     '如果资料里没有答案,就明确说"我不知道,资料里没提到",不要编造。'
     "回答完简要回答后,用一句话给出最相关的 1-3 条来源编号。"
+    "参考资料中的图片引用(形如 ![...](/converted/...) 的 markdown 语法)必须逐字原样保留进答案,"
+    "不得改写、缩写或编造任何图片路径;参考资料里没有图片引用时,答案里不得出现任何图片语法。"
 )
+
+# 片段全文里的 markdown 图片引用,用于截断后完整回填(防长引用被 200 字符截在中间)
+_IMG_REF_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 
 
 class Generator:
@@ -38,7 +45,12 @@ class Generator:
         for i, n in enumerate(nodes, 1):
             source = n.node.metadata.get("source", "unknown")
             doc_id = n.node.metadata.get("doc_id", "")
-            snippet = n.node.get_content().strip().replace("\n", " ")[:200]
+            content = n.node.get_content().strip()
+            snippet = content.replace("\n", " ")[:200]
+            # 图片引用整条抽出、截断后完整追加:LLM 拿到半截 URL 会脑补路径
+            img_refs = list(dict.fromkeys(_IMG_REF_RE.findall(content)))
+            if img_refs:
+                snippet += "\n[本片段完整图片引用,回答时原样保留: " + " ".join(img_refs) + "]"
             context_blocks.append(
                 f"[{i}] (来源:{source} | doc_id={doc_id} | 相关度:{n.score:.3f})\n{snippet}..."
             )

@@ -59,6 +59,13 @@ class Config:
     MILVUS_DB: str = os.getenv("MILVUS_DB", "rag_kb")
     MILVUS_COLLECTION: str = os.getenv("MILVUS_COLLECTION", "personal_kb")
 
+    # ====== MySQL(问答历史持久化)======
+    MYSQL_HOST: str = _need("MYSQL_HOST")
+    MYSQL_PORT: int = int(_need("MYSQL_PORT"))
+    MYSQL_USER: str = _need("MYSQL_USER")
+    MYSQL_PASSWORD: str = _need("MYSQL_PASSWORD")
+    MYSQL_DATABASE: str = _need("MYSQL_DATABASE")
+
     # ====== 检索 / 重排 ======
     TOP_K: int = int(os.getenv("TOP_K", "10"))
     RERANK_TOP_N: int = int(os.getenv("RERANK_TOP_N", "5"))
@@ -78,6 +85,12 @@ class Config:
     MINERU_ENABLED: bool = os.getenv("MINERU_ENABLED", "false").lower() == "true"
     # minerU 可执行文件路径(conda 环境下避免 PATH 找不到)
     MINERU_BIN: str = os.getenv("MINERU_BIN", "/opt/anaconda3/envs/rag/bin/mineru")
+    # minerU-kit 独立 CLI(走 `-o <dir> -f markdown`,产物含 base64 内嵌图)
+    # 与 minerU 顶层 CLI 是两套入口,共享同一 backend,但 minerU-kit 才有 -o 目录输出
+    MINERU_KIT_BIN: str = os.getenv(
+        "MINERU_KIT_BIN",
+        str(Path(MINERU_BIN).with_name("mineru-kit")) if MINERU_BIN else "/opt/anaconda3/envs/rag/bin/mineru-kit",
+    )
     # 转换出来的 markdown + 图片存放目录(项目根 converted/,可查可进仓)
     MINERU_OUTDIR: Path = PROJECT_ROOT / os.getenv("MINERU_OUTDIR", "converted")
     # minerU 单 PDF 解析超时(秒),避免卡死
