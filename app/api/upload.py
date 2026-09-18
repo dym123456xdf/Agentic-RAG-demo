@@ -18,6 +18,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.core.config import Config
 from app.core.milvus_client import get_store
+from app.rag.loader import MINERU_CONVERTIBLE, convert_to_markdown, converted_md_path
 from app.rag.pipeline import RAGPipeline
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -34,13 +35,18 @@ def get_pipeline() -> RAGPipeline:
 
 
 @router.post("/files")
-async def upload_files(files: list[UploadFile] = File(...)):  # noqa: B008
+async def upload_files(
+    files: list[UploadFile] = File(...),  # noqa: B008
+    convert_only: bool = False,
+):
     """前端一次拖多个文件过来,落到 uploads/,入库。
 
     幂等:同名文件已存在直接跳过,只入库新文件。
     """
     if not files:
         raise HTTPException(400, "没收到文件")
+    if convert_only and not Config.MINERU_ENABLED:
+        raise HTTPException(400, "仅转换模式依赖 MinerU,请先设置 MINERU_ENABLED=true")
 
     saved: list[str] = []
     for f in files:
@@ -56,10 +62,35 @@ async def upload_files(files: list[UploadFile] = File(...)):  # noqa: B008
             shutil.copyfileobj(f.file, out)
         saved.append(safe_name)
 
+    # 仅转换模式:转 Markdown 落盘 converted/ 但不入库,先检查转换质量
+    if convert_only:
+        converted: list[str] = []
+        for name in saved:
+            p = Config.UPLOAD_DIR / name
+            if p.suffix.lower() in MINERU_CONVERTIBLE:
+                converted.append(str(convert_to_markdown(p)))
+            else:
+                # .md/.txt 本身就是可读文本,无需转换,直接返回源文件路径
+                converted.append(str(p))
+        return {
+            "saved": saved,
+            "converted": converted,
+            "ingested": False,
+            "note": "convert_only=true,仅转换未入库;检查 converted/*.md 无误后去掉参数重传即可入库",
+        }
+
     # 一次入库一批,只跑一次 embedding(对新文件)
     pipeline = get_pipeline()
     result = pipeline.ingest(str(Config.UPLOAD_DIR))
-    return {"saved": saved, **result}
+
+    # 汇总本次入库链路中产生 / 复用的 MinerU 产物,方便前端展示 md 路径
+    converted = []
+    for name in saved:
+        p = Config.UPLOAD_DIR / name
+        if p.suffix.lower() in MINERU_CONVERTIBLE and converted_md_path(p).exists():
+            converted.append(str(converted_md_path(p)))
+
+    return {"saved": saved, "converted": converted, **result}
 
 
 @router.post("/dir")

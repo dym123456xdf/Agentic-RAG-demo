@@ -1,5 +1,0 @@
-- [x] 1.1 编写失败测试 `tests/unit/test_llm_provider.py`(RED)
-- [x] 2.1 `config.py` 新增 LLM_PROVIDER + GLM_* 字段 + `llm_credentials()`(GREEN)
-- [x] 2.2 `llm.py` 改用 `Config.llm_credentials()`
-- [x] 3.1 同步 `.env.bak` + `AGENTS.md`
-- [x] 3.2 `make check` 全绿(28 passed)

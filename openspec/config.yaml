@@ -1,34 +1,32 @@
 schema: spec-driven
 
-context: |
-  Tech stack: Python ≥ 3.11, FastAPI, LlamaIndex, Milvus
-  Package manager: pip (pyproject.toml)
-  LLM: MiniMax-M3 (OpenAI compatible)
-  Embedding: embo-01 (MiniMax, custom adapter)
-  Vector store: Milvus standalone (Docker)
-  Reranker: BAAI/bge-reranker-v2-m3 (local MPS/CPU)
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
 
-  Product language:
-  - Write OpenSpec proposals and specs in user-facing product behavior language
-  - Requirements should describe observable behavior and product contract
-  - Avoid implementation-negative SHALL statements when a positive user outcome can express the same rule
-  - Put internal mechanisms in design.md or tasks.md unless the mechanism is itself part of the user-facing contract
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
 
-  Project conventions:
-  - RAG pipeline is 5-stage: pre_query → retriever → post → generator (+ indexer for ingestion)
-  - Each stage is independently testable and replaceable
-  - External dependencies (LLM, Milvus, Embedding) must be mockable in tests
-  - All configuration comes from app/core/config.py (reads .env)
-  - Chinese comments and documentation are the norm
-
-rules:
-  specs:
-    - Requirements describe user-facing behavior, not implementation details
-    - Include concrete scenarios with WHEN/THEN/GIVEN format
-    - Test coverage is mandatory for new capabilities
-  tasks:
-    - Every task that changes behavior must include a test task
-    - Mark tasks [x] only after verification passes
-  design:
-    - Document tradeoffs and alternatives considered
-    - Keep external dependency interfaces behind adapters
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
