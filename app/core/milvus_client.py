@@ -85,6 +85,22 @@ class MilvusStore:
             counts[name] = counts.get(name, 0) + 1
         return counts
 
+    def delete_source(self, name: str) -> int:
+        """删除指定 source(文件名)的全部 chunk,返回删除条数;collection 不存在返回 0。
+
+        入库幂等键就是 source,按文件名整文件删与 list_sources() 对齐。
+        name 中的双引号转义,防 Milvus 表达式注入。
+        注意 pymilvus 2.6.x 返回 OmitZeroDict:删除 0 条时键本身被省略,用 .get 兜底。
+        """
+        if not self.has_collection():
+            return 0
+        escaped = name.replace('"', '\\"')
+        result = self._client.delete(
+            collection_name=Config.MILVUS_COLLECTION,
+            filter=f'source == "{escaped}"',
+        )
+        return result.get("delete_count", 0)
+
 
 _singleton: MilvusStore | None = None
 

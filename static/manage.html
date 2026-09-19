@@ -153,7 +153,8 @@ async function refreshFiles() {
       li.innerHTML =
         `<span class="name" title="${escapeHtml(f.name)}">${SVG.file}<span class="n-text">${escapeHtml(f.name)}</span></span>` +
         `<span class="chunks">${f.chunks}</span>` +
-        (f.has_converted ? `<span class="view-md" data-name="${escapeHtml(f.name)}">查看转换MD</span>` : "");
+        (f.has_converted ? `<span class="view-md" data-name="${escapeHtml(f.name)}">查看转换MD</span>` : "") +
+        `<span class="del-file" data-name="${escapeHtml(f.name)}" title="删除该文件">${SVG.trash}</span>`;
       ul.appendChild(li);
     }
   } catch (e) { /* ignore */ }
@@ -173,6 +174,20 @@ function renderMdWithImages(md, name) {
 }
 
 $("fileList").onclick = async e => {
+  // 删除按钮优先(与 .view-md 互斥)
+  const delEl = e.target.closest(".del-file");
+  if (delEl) {
+    const name = delEl.dataset.name;
+    if (!confirm(`删除「${name}」?将移除其全部向量与转换产物,不可恢复`)) return;
+    try {
+      const r = await fetch(`/upload/files/${encodeURIComponent(name)}`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || "删除失败");
+      showToast(`已删除 ${name}(移除 ${d.chunks_removed} 条向量)`);
+      refreshFiles();
+    } catch (err) { showToast(err.message, true); }
+    return;
+  }
   const el = e.target.closest(".view-md");
   if (!el) return;
   try {

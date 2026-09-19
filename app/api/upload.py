@@ -4,6 +4,7 @@
 - POST /upload/files   multipart, 多个文件上传
 - POST /upload/dir     JSON, 指定服务器上的目录路径,递归读
 - GET  /upload/files   列出已入库文件(filename + chunks)
+- DELETE /upload/files/{name}  删除单个已入库文件(Milvus + 磁盘联动)
 - POST /upload/clear   清空 collection(谨慎使用,删全部数据)
 
 幂等:
@@ -146,6 +147,48 @@ def _has_converted(name: str) -> bool:
     if Path(name).suffix.lower() not in MINERU_CONVERTIBLE:
         return False
     return converted_md_path(Config.UPLOAD_DIR / name).exists()
+
+
+@router.delete("/files/{name}")
+async def delete_file(name: str):
+    """删除单个已入库文件:Milvus chunk + uploads/<name> + converted/<stem>/ 三处联动。
+
+    删除序(Milvus 先行,向量库是真相源):
+    1. name 白名单校验(basename、无 /、后缀在 ALLOWED_EXTS)→ 否则 404
+    2. MilvusStore.delete_source(name) 删 chunk
+    3. 磁盘容错:uploads/<name> 与 converted/<stem>/ 不存在则跳过(支持脏数据清理)
+    4. Milvus 计数 0 且磁盘两侧均无实体 → 404 "不在库中"
+    响应:{deleted, chunks_removed}
+    """
+    # 防路径穿越:与 /converted/{name} 同一白名单惯例
+    safe = Path(name).name
+    if safe != name or "/" in name or "\\" in name:
+        raise HTTPException(404, "非法文件名")
+    if Path(safe).suffix.lower() not in Config.ALLOWED_EXTS:
+        raise HTTPException(404, "非法文件名")
+
+    store = get_store()
+    chunks_removed = store.delete_source(safe)
+
+    # 磁盘侧容错删除(Milvus 有、磁盘无 的脏数据场景直接跳过)
+    uploaded = Config.UPLOAD_DIR / safe
+    disk_upload_gone = not uploaded.exists()
+    if uploaded.exists():
+        uploaded.unlink()
+
+    converted_dir = Config.MINERU_OUTDIR / Path(safe).stem
+    disk_converted_gone = not converted_dir.is_dir()
+    if converted_dir.is_dir():
+        shutil.rmtree(converted_dir, ignore_errors=True)
+
+    # 两边都没发生实际删除:Milvus 无此 source 且磁盘无实体 → 该文件"不在库中"
+    if chunks_removed == 0 and disk_upload_gone and disk_converted_gone:
+        raise HTTPException(404, f"不在库中: {safe}")
+
+    print(f"[upload] 删除 {safe}: Milvus {chunks_removed} chunk,"
+          f" uploads={'删' if not disk_upload_gone else '无'},"
+          f" converted={'删' if not disk_converted_gone else '无'}")
+    return {"deleted": safe, "chunks_removed": chunks_removed}
 
 
 @router.get("/converted/{name}")
