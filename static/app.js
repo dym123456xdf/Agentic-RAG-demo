@@ -1,5 +1,17 @@
 /* 共享脚本 —— 会话/历史 API 封装 + 消息渲染(首页与管理页共用,避免两份拷贝漂移) */
 
+// ---------- 内联 SVG 图标(stroke 跟随文字色,替代 emoji) ----------
+const SVG = {
+  // 文件(列表行)
+  file: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>',
+  // 回形针(参考来源)
+  clip: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+  // 问号(历史问答的提问)
+  help: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
+  // 警告(请求失败)
+  alert: '<svg class="ic chat-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+};
+
 // ---------- 工具 ----------
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -66,11 +78,11 @@ function messageHtml(m, collapsed = false) {
   let inner = m.role === "user" ? escapeHtml(m.content) : renderChatImages(escapeHtml(m.content));
 
   if (m.role !== "user" && m.sources && m.sources.length) {
-    let src = "<b>📎 参考来源</b>";
+    let src = `<b class="src-title">${SVG.clip}参考来源</b>`;
     for (const s of m.sources) {
       src += `<div class="src">[#${s.index}] <b>${escapeHtml(s.source)}</b> ` +
-             `<span style="float:right;color:#888">score=${s.score}</span><br>` +
-             `<span style="color:#555">${escapeHtml(String(s.content).slice(0, 200))}…</span></div>`;
+             `<span class="src-score">score=${s.score}</span><br>` +
+             `<span class="src-snippet">${escapeHtml(String(s.content).slice(0, 200))}…</span></div>`;
     }
     if (collapsed) {
       inner += `<details><summary>展开来源与详情</summary><div class="sources">${src}</div>${metaHtml(m.meta)}</details>`;

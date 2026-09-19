@@ -7,26 +7,34 @@
 </head>
 <body>
 <aside id="sidebar">
-  <div>
-    <h1>📚 个人知识库</h1>
-    <h2 id="status">未连接</h2>
+  <div class="brand">
+    <h1><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>个人知识库</h1>
+    <div id="status">未连接</div>
   </div>
 
-  <div>
-    <h2>💬 会话 <button class="btn ghost" id="btnNew" style="width:100%;margin-top:8px">＋ 新会话</button></h2>
+  <div class="side-section">
+    <div class="side-title">会话</div>
+    <button class="btn ghost btn-block" id="btnNew"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>新会话</button>
     <ul class="session-list" id="sessionList"></ul>
   </div>
 
-  <a class="btn ghost" href="/static/manage.html" style="text-align:center;text-decoration:none">⚙️ 知识库管理</a>
+  <a class="btn ghost btn-block" href="/static/manage.html"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>知识库管理</a>
 
-  <button class="btn ghost" id="btnClear" style="margin-top:auto">清空当前会话</button>
+  <button class="btn ghost btn-block" id="btnClear">清空当前会话</button>
 </aside>
 
 <section id="main">
   <div id="chat"></div>
+  <div id="empty-hero">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg>
+    <h2>今天想查点什么?</h2>
+    <p>基于你入库的文档检索并回答</p>
+  </div>
   <div id="input-bar">
-    <input id="q" placeholder="向你的知识库提问..." autocomplete="off">
-    <button id="send">发送</button>
+    <div class="input-wrap">
+      <input id="q" placeholder="向你的知识库提问…" autocomplete="off">
+      <button id="send" title="发送" aria-label="发送"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg></button>
+    </div>
   </div>
 </section>
 
@@ -38,6 +46,11 @@ const $ = id => document.getElementById(id);
 const chatEl = $("chat");
 
 let currentSessionId = null;   // 当前会话(持久化在服务端,前端不再维护 history)
+
+// 空状态问候:无消息时顶替聊天区展示(问候节点是 #chat 的兄弟,避免被 innerHTML 清空)
+function syncHero() {
+  $("main").classList.toggle("empty", chatEl.children.length === 0);
+}
 
 // ---------- 会话列表 ----------
 async function refreshSessions(selectId = null) {
@@ -74,6 +87,7 @@ async function createSession() {
     await refreshSessions(s.id);
     showToast("已新建会话");
   } catch (e) { showToast(e.message, true); }
+  syncHero();
 }
 
 async function removeSession(id) {
@@ -87,6 +101,7 @@ async function removeSession(id) {
     await refreshSessions();
     showToast("会话已删除");
   } catch (e) { showToast(e.message, true); }
+  syncHero();
 }
 
 // ---------- 会话切换:拉历史渲染回显(与实时回答同一渲染路径) ----------
@@ -99,6 +114,7 @@ async function switchSession(id) {
     chatEl.scrollTop = chatEl.scrollHeight;
   } catch (e) { showToast(e.message, true); }
   await refreshSessions(id);
+  syncHero();
 }
 
 $("btnNew").onclick = createSession;
@@ -110,6 +126,7 @@ $("btnClear").onclick = async () => {
     chatEl.innerHTML = "";
     showToast("会话已清空");
   } catch (e) { showToast(e.message, true); }
+  syncHero();
 };
 
 // ---------- 聊天 ----------
@@ -123,6 +140,7 @@ async function send() {
   }
   $("send").disabled = true;
   chatEl.insertAdjacentHTML("beforeend", `<div class="msg user">${escapeHtml(q)}</div>`);
+  $("main").classList.remove("empty");
   $("q").value = "";
   chatEl.scrollTop = chatEl.scrollHeight;
   try {
@@ -136,7 +154,8 @@ async function send() {
       { role: "assistant", content: data.answer, sources: data.sources, meta: data.meta }));
     chatEl.scrollTop = chatEl.scrollHeight;
   } catch (e) {
-    chatEl.insertAdjacentHTML("beforeend", `<div class="msg bot">⚠️ ${escapeHtml(e.message)}</div>`);
+    chatEl.insertAdjacentHTML("beforeend",
+      `<div class="msg bot msg-error">${SVG.alert}${escapeHtml(e.message)}</div>`);
   } finally {
     $("send").disabled = false;
     $("q").focus();
@@ -146,7 +165,12 @@ $("send").onclick = send;
 $("q").onkeydown = e => { if (e.key === "Enter") send(); };
 
 // ---------- 启动 ----------
-fetch("/docs").then(r => $("status").textContent = r.ok ? "✅ 服务正常" : "❌ 服务异常");
+fetch("/docs").then(r => {
+  const st = $("status");
+  st.textContent = r.ok ? "服务正常" : "服务异常";
+  st.classList.toggle("ok", r.ok);
+  st.classList.toggle("err", !r.ok);
+});
 (async () => {
   await refreshSessions();
   // 无会话时自动建一个,保证打开即可提问;有会话则自动选最近活跃的并回显
