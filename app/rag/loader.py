@@ -10,6 +10,11 @@ MinerU 通道(MINERU_ENABLED=true):PDF/DOCX/PPTX 先经 mineru CLI 转成 Markdo
 产物集中落盘 converted/<stem>/(md 与 images/ 同级,stem 为原文件名去后缀)供用户人工检查
 转换质量;同名产物已存在时直接复用,不重复转换;转换失败快速抛错,不静默回退。
 入库时图片相对路径会在内存里改写为 /converted/<stem>/images/x 绝对 URL,落盘文件不动。
+
+.md/.txt 通道:_rewrite_md_image_refs() 把「本地存在」的相对图片引用拷到
+converted/<stem>/assets/ 并改写成绝对 URL,让 LLM 原样保留引用时前端可渲染。
+安全约束:外链/绝对路径服务端绝不 fetch,路径穿越(resolve 后须仍在源文件目录内)
+与不存在的引用一律保持原文不动 —— 负路径行为不变。
 """
 from __future__ import annotations
 
@@ -75,6 +80,58 @@ def _extract_base64_images(md: str, images_dir: Path) -> str:
         return f"![image](images/{digest}.{ext})"
 
     return _BASE64_IMG_RE.sub(_repl, md)
+
+
+# 匹配 md/txt 源文本里的图片引用 `![alt](ref)` —— ref 候选本地资产(含相对路径与已改写 URL)
+_MD_REL_IMG_RE = re.compile(r"(!\[[^\]]*\]\()([^()\s]+)(\))")
+_ASSETS_SUBDIR = "assets"
+# 带 scheme 的引用(http: https: data: mailto: 乃至 Windows 盘符 C:)—— 服务端绝不 fetch
+_SCHEME_REF_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
+
+
+def _asset_ref_ok(ref: str) -> bool:
+    """判断图片引用 ref 是否「可安全重写的本地相对路径」。
+
+    排除:空值、外链(data:/http 等 scheme,含 Windows 盘符)、协议相对(//host)、
+    绝对路径、已带 /converted/ 前缀(重复改写会二次前缀化)、含 .. 段(路径穿越)。
+    """
+    if not ref or ref.startswith(("/", "//")):
+        return False
+    if _SCHEME_REF_RE.match(ref):
+        return False
+    if ".." in ref.split("/"):
+        return False
+    if ref.startswith("converted/"):  # 历史文本里已改写过的
+        return False
+    return True
+
+
+def _rewrite_md_image_refs(path: Path, text: str) -> str:
+    """md/txt 源文本入库前:把「本地真实存在」的相对图片引用拷进
+    converted/<stem>/assets/ 并改写成 /converted/<stem>/assets/<basename> 绝对 URL。
+
+    只改内存文本,源文件不动。LLM 原样保留引用时,前端 /converted/ 白名单即可渲染。
+    安全边界:外链/绝对路径/不存在/.. 穿越的引用一律保持原文 —— 负路径行为不变。
+    同名 basename 撞车(不同子目录)时先入库者胜,后到者不覆盖。
+    """
+    src_dir = path.parent.resolve()
+    stem = path.stem
+    assets_dir = Config.MINERU_OUTDIR / stem / _ASSETS_SUBDIR
+
+    def _repl(m: re.Match) -> str:
+        prefix, ref, suffix = m.group(1), m.group(2), m.group(3)
+        if not _asset_ref_ok(ref):
+            return m.group(0)
+        local = (src_dir / ref).resolve()
+        if not local.is_relative_to(src_dir) or not local.is_file():
+            return m.group(0)  # 逃出源文件目录 / 文件不存在 → 保留原文
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        out = assets_dir / local.name
+        if not out.exists():
+            out.write_bytes(local.read_bytes())
+        return f"{prefix}/converted/{stem}/{_ASSETS_SUBDIR}/{local.name}{suffix}"
+
+    return _MD_REL_IMG_RE.sub(_repl, text)
 
 
 def convert_to_markdown(path: Path) -> Path:
@@ -147,8 +204,9 @@ def _load_one(path: Path) -> list[Document]:
     meta_base = {"source": path.name}
 
     if suffix in {".md", ".markdown", ".txt"}:
-        # markdown 文本直读,保留 # 标题,后面 MarkdownNodeParser 才有结构可切
-        return [Document(text=_read_text(path), metadata=meta_base)]
+        # markdown 文本直读,保留 # 标题,后面 MarkdownNodeParser 才有结构可切;
+        # 本地存在的图片引用改写成 /converted/ 绝对 URL,LLM 原样保留时前端可渲染
+        return [Document(text=_rewrite_md_image_refs(path, _read_text(path)), metadata=meta_base)]
 
     if Config.MINERU_ENABLED:
         # MinerU 通道:转 Markdown 落盘 converted/<stem>/ 再读,用户可先检查转换质量;

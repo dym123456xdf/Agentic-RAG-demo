@@ -1,7 +1,7 @@
 # document-loading Specification
 
 ## Purpose
-覆盖 PDF / DOCX / PPTX 经 MinerU 通道转 Markdown 入库的端到端契约:`mineru-kit parse`(tier=basic)调用语法、产物落盘与图片抽取(`converted/<stem>/` 每文档一文件夹)、入库文本图片引用规范化、错误语义、`MINERU_ENABLED` 开关行为。
+覆盖两条入库通道的端到端契约:① PDF / DOCX / PPTX 经 MinerU 通道转 Markdown 入库(`mineru-kit parse`,tier=basic,产物落盘 `converted/<stem>/`、图片抽取、错误语义、`MINERU_ENABLED` 开关);② `.md` / `.markdown` / `.txt` 直传通道的图片引用规范化(本地存在的相对引用拷贝至 `converted/<stem>/assets/` 并改写为绝对 URL,外链/穿越/不存在的引用保持原文)。
 
 ## Requirements
 
@@ -125,10 +125,22 @@ MinerU 转换失败 SHALL 抛 RuntimeError 且带可定位信息(原文件名 + 
 - **WHEN** `converted/<stem>/` 下已存在该文件的转换产物,重新上传入库(产物直接复用)
 - **THEN** 入库 chunk 文本中的图片引用仍被规范化为绝对 URL
 
-### Requirement: 原生 Markdown 直传不做路径改写
+### Requirement: 原生 Markdown 直传的图片引用规范化
 
-`.md` / `.markdown` 文件直传入库时,其文本中的图片引用 SHALL 保持原样,不做任何路径改写或搬运(此类文件的图片语义由作者自行负责,系统不猜测其存放位置)。
+`.md` / `.markdown` / `.txt` 文件直传入库时,文本中「本地真实存在」的相对图片引用(相对该文件所在目录解析、且为普通文件)SHALL 被拷贝到 `converted/<stem>/assets/<basename>` 并在入库文本中改写为 `![alt](/converted/<stem>/assets/<basename>)` 绝对 URL,使 LLM 原样保留引用时前端可按 `/converted/` 白名单直接渲染;落盘源文件 SHALL 保持原样不动。以下引用 SHALL 保持原文、不拷贝不改写:外链(`http:` / `https:` / `data:` 等带 scheme)、协议相对(`//host`)、绝对路径、含 `..` 段的引用(路径穿越),以及磁盘上不存在的相对引用(负路径行为)。
 
-#### Scenario: 直传 md 引用不被改写
-- **WHEN** 用户直传一份图片引用为 `./assets/a.png` 的 `.md` 文件并入库
-- **THEN** 向量库中该文档 chunk 的文本保留 `./assets/a.png` 原文
+#### Scenario: 本地存在的相对引用被改写
+- **WHEN** 直传一份含 `![架构图](assets/flow.png)` 的 `.md`,且该文件同目录下 `assets/flow.png` 存在
+- **THEN** 向量库 chunk 文本中该引用为 `![架构图](/converted/<stem>/assets/flow.png)`,且 `converted/<stem>/assets/flow.png` 已落盘;源 md 文件内容不变
+
+#### Scenario: 不存在的相对引用保持原文
+- **WHEN** 直传一份含 `![架构图](./assets/a.png)` 的 `.md`,磁盘上不存在该文件
+- **THEN** chunk 文本保留 `./assets/a.png` 原文(负路径用例,前端 `/converted/` 白名单不匹配,显示 markdown 原文)
+
+#### Scenario: 外链与路径穿越引用保持原文
+- **WHEN** 直传 md 含 `![a](https://x.com/i.png)`、`![b](data:image/png;base64,xx)`、`![c](../../secret.png)` 或绝对路径引用
+- **THEN** 以上引用在 chunk 文本中均保持原文,服务端不 fetch 任何 URL、不发生路径穿越
+
+#### Scenario: 改写幂等
+- **WHEN** 一份已被改写为 `![x](/converted/<stem>/assets/<f>)` 的文本再次入库
+- **THEN** 引用不被二次前缀化,保持原样
