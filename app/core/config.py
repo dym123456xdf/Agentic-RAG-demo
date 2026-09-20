@@ -73,6 +73,11 @@ class Config:
     # distance ∈ [0, 2],2.0 等于"全过",BGE 重排干全部精修;调低可粗筛
     SIMILARITY_CUTOFF: float = float(os.getenv("SIMILARITY_CUTOFF", "2.0"))
     RERANK_MODEL: str = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
+    # 低置信度友情提示阈值(0-1):重排 logit 经 sigmoid 归一后与它比,< 阈值时首页显示提示。
+    # 口径:0.6 对应 BGE logit≈0.41("较相关");换重排模型后口径漂移可用 .env 调。
+    # 原默认 0.8 (logit≈1.39) 在 BGE 实际打分中过于保守 —— 即使 BGE 判为几乎满分
+    # (logit≈1.0),sigmoid 归一也只到 0.73,sigmoid 饱和让 0.8 阈值几乎触不到 high_confidence 路径。
+    CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.6"))
 
     # ====== 服务 / 上传 ======
     HOST: str = os.getenv("HOST", "127.0.0.1")

@@ -8,12 +8,27 @@ BGE 模型加载较慢(~13s 冷启),用模块级 lazy 单例,只在第一次调�
 """
 from __future__ import annotations
 
+import math
+
 from llama_index.core.schema import NodeWithScore
 from sentence_transformers import CrossEncoder
 
 from app.core.config import Config
 
 _BGE: CrossEncoder | None = None
+
+
+def bge_confidence(logit: float) -> float:
+    """BGE 重排 logit(约 -10~10,越大越相关)→ 0-1 置信度。
+
+    用 sigmoid 归一:0.6 对应 logit≈0.41("较相关",Config.CONFIDENCE_THRESHOLD 默认值),
+    0.8 对应 logit≈1.39("中等相关")。阈值可解释,换重排模型后口径漂移用 .env 调。
+    数值兜底:负 logit 绝对值过大时 exp 下溢直接 0.0,正方向上溢时饱和 1.0。
+    """
+    try:
+        return round(1.0 / (1.0 + math.exp(-logit)), 4)
+    except OverflowError:
+        return 0.0 if logit < 0 else 1.0
 
 
 def _get_reranker() -> CrossEncoder:
@@ -50,6 +65,9 @@ class PostProcessor:
         scores = reranker.predict(pairs, show_progress_bar=False)
         for n, s in zip(filtered, scores, strict=False):
             n.score = float(s)
+            # 0-1 置信度(sigmoid(logit));NodeWithScore 是 pydantic 模型,直接 setattr 报
+            # "no field",用 __dict__ 写入绕过校验(下游 generator 用 getattr 读,不依赖序列化)。
+            n.__dict__["confidence"] = bge_confidence(n.score)
 
         filtered.sort(key=lambda x: x.score or 0.0, reverse=True)
         return filtered[: self._top_n]

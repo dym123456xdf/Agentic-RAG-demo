@@ -265,12 +265,11 @@ async function renderHistMessages(sessionId) {
           html += `<div class="a">${renderChatImages(escapeHtml(a.content))}</div>`;
           if (a.sources && a.sources.length) {
             let src = `<b class="src-title">${SVG.clip}参考来源</b>`;
-            for (const s of a.sources) {
-              src += `<div class="src">[#${s.index}] <b>${escapeHtml(s.source)}</b> ` +
-                     `<span class="src-score">score=${s.score}</span><br>` +
-                     `<span class="src-snippet">${escapeHtml(String(s.content).slice(0, 200))}…</span></div>`;
-            }
-            html += `<details><summary>展开来源与详情</summary><div class="sources">${src}</div>${metaHtml(a.meta)}</details>`;
+            for (const s of a.sources) src += srcItemHtml(s);
+            html += `<details><summary>展开来源与详情</summary>${lowConfidenceHtml(a.meta)}<div class="sources">${src}</div>${metaHtml(a.meta)}</details>`;
+          } else {
+            const notice = lowConfidenceHtml(a.meta);
+            if (notice) html += notice;
           }
           i++;
         }

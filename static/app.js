@@ -73,23 +73,44 @@ function renderChatImages(escaped) {
   );
 }
 
+// 单条参考来源行(首页 / 管理页共用):优先显示 0-1 置信度,旧数据无 confidence 时退回原始 score。
+// 置信度低于阈值时该行加 .low 类(前端按 meta.low_confidence 已由服务端判过,这里只排版)。
+function srcItemHtml(s) {
+  const scoreTag = s.confidence != null
+    ? `<span class="src-score">置信度=${s.confidence}</span>`
+    : (s.score != null ? `<span class="src-score">score=${s.score}</span>` : "");
+  return `<div class="src">[#${s.index}] <b>${escapeHtml(s.source)}</b> ${scoreTag}<br>` +
+         `<span class="src-snippet">${escapeHtml(String(s.content).slice(0, 200))}…</span></div>`;
+}
+
+// 低置信度友情提示:服务端在 meta 事件 / 落库 meta 里算好 low_confidence 布尔,
+// 前端只负责显示(阈值 CONFIDENCE_THRESHOLD 是服务端配置,避免前后端漂移)。
+// 无 confidence 的旧历史消息返回 "",不显示提示、不报错。
+function lowConfidenceHtml(meta) {
+  if (!meta || !meta.low_confidence || meta.confidence == null) return "";
+  const th = meta.threshold != null ? meta.threshold : 0.6;
+  return `<div class="conf-notice">${SVG.help}参考置信度 ${meta.confidence}(${th} 及以上较可靠),` +
+         `答案可能不够可靠,建议核对原文档。</div>`;
+}
+
 // 实时聊天:直接渲染来源与 meta;历史回溯(collapsed=true):来源与 meta 放进可展开的 <details>
 function messageHtml(m, collapsed = false) {
   const cls = m.role === "user" ? "user" : "bot";
   // 图片只渲染在助手回答里;用户消息保持原文(自己输入的语法原文更直观)
   let inner = m.role === "user" ? escapeHtml(m.content) : renderChatImages(escapeHtml(m.content));
 
-  if (m.role !== "user" && m.sources && m.sources.length) {
-    let src = `<b class="src-title">${SVG.clip}参考来源</b>`;
-    for (const s of m.sources) {
-      src += `<div class="src">[#${s.index}] <b>${escapeHtml(s.source)}</b> ` +
-             `<span class="src-score">score=${s.score}</span><br>` +
-             `<span class="src-snippet">${escapeHtml(String(s.content).slice(0, 200))}…</span></div>`;
-    }
-    if (collapsed) {
-      inner += `<details><summary>展开来源与详情</summary><div class="sources">${src}</div>${metaHtml(m.meta)}</details>`;
-    } else {
-      inner += `<div class="sources">${src}</div>` + metaHtml(m.meta);
+  if (m.role !== "user") {
+    // 低置信度提示挂在来源块上方(无来源的"我不知道"答案不挂)
+    const notice = lowConfidenceHtml(m.meta);
+    if (notice) inner += notice;
+    if (m.sources && m.sources.length) {
+      let src = `<b class="src-title">${SVG.clip}参考来源</b>`;
+      for (const s of m.sources) src += srcItemHtml(s);
+      if (collapsed) {
+        inner += `<details><summary>展开来源与详情</summary><div class="sources">${src}</div>${metaHtml(m.meta)}</details>`;
+      } else {
+        inner += `<div class="sources">${src}</div>` + metaHtml(m.meta);
+      }
     }
   }
   return `<div class="msg ${cls}">${inner}</div>`;

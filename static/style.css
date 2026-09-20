@@ -130,6 +130,19 @@ details summary { cursor: pointer; color: var(--accent); font-size: 12.5px;
                   margin-top: 8px; user-select: none; }
 details summary:hover { color: var(--accent-hover); }
 
+/* 低置信度友情提示:复用管理页 .notice 的暖色令牌(#7A4E10 on #FFF7E8 已验证 ≥4.5:1) */
+.conf-notice { display: flex; align-items: flex-start; gap: 6px; margin-top: 10px;
+              background: var(--notice-bg); border: 1px solid var(--notice-border);
+              color: var(--notice-text); border-radius: var(--radius-sm);
+              padding: 8px 12px; font-size: 12.5px; line-height: 1.5; }
+.conf-notice .ic { color: var(--notice-text); margin-top: 2px; }
+
+/* 流式答案:占位"检索中…"闪烁,首个 delta 到达即移除 streaming 类 */
+.stream-text { min-height: 1em; }
+.stream-text.streaming { color: var(--text-secondary); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.stream-error { color: var(--danger); }
+
 /* 空状态问候(#chat 的兄弟节点,#main.empty 时顶替 #chat 展示;
    不放进 #chat 内部 —— switchSession() 会 innerHTML="" 清空它) */
 #empty-hero { display: none; }

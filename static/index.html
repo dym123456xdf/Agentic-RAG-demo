@@ -129,7 +129,9 @@ $("btnClear").onclick = async () => {
   syncHero();
 };
 
-// ---------- 聊天 ----------
+// ---------- 聊天(流式) ----------
+// 发送 -> /chat/stream SSE:meta 事件到达先渲染参考来源块(感知提速),delta 逐块追加答案,
+// done 定格 / error 报错。检索+重排完成前气泡显示"检索中…"占位。
 async function send() {
   const q = $("q").value.trim();
   if (!q) return;
@@ -144,21 +146,84 @@ async function send() {
   $("q").value = "";
   chatEl.scrollTop = chatEl.scrollHeight;
   try {
-    const r = await fetch("/chat", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: q, session_id: currentSessionId }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || "请求失败");
-    chatEl.insertAdjacentHTML("beforeend", messageHtml(
-      { role: "assistant", content: data.answer, sources: data.sources, meta: data.meta }));
-    chatEl.scrollTop = chatEl.scrollHeight;
+    await streamAnswer(q, currentSessionId);
   } catch (e) {
+    // HTTP 级错误(400/404/5xx):按原逻辑给错误气泡
     chatEl.insertAdjacentHTML("beforeend",
       `<div class="msg bot msg-error">${SVG.alert}${escapeHtml(e.message)}</div>`);
   } finally {
     $("send").disabled = false;
     $("q").focus();
+  }
+}
+
+async function streamAnswer(question, sessionId) {
+  // 1. 占位气泡:检索中…
+  const botEl = document.createElement("div");
+  botEl.className = "msg bot";
+  botEl.innerHTML = `<div class="stream-text streaming">检索中…</div>`;
+  chatEl.appendChild(botEl);
+  let textEl = botEl.querySelector(".stream-text");
+  let answer = "";
+
+  const r = await fetch("/chat/stream", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, session_id: sessionId }),
+  });
+  if (!r.ok || !r.body) {
+    let detail = `请求失败(${r.status})`;
+    try { detail = (await r.json()).detail || detail; } catch { /* 非 JSON 响应 */ }
+    botEl.remove();
+    throw new Error(detail);
+  }
+
+  // 2. 逐帧解析 SSE(data: {json}\n\n)
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf("\n\n")) !== -1) {
+      const frame = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      const data = frame.replace(/^data:\s*/, "").trim();
+      if (!data) continue;
+      let ev;
+      try { ev = JSON.parse(data); } catch { continue; }
+      if (ev.type === "meta") {
+        // 检索一完成:占位换成来源块(+ 低置信度提示),答案区继续显示检索中
+        let html = "";
+        if (ev.low_confidence && ev.confidence != null) {
+          html += lowConfidenceHtml({ low_confidence: true, confidence: ev.confidence, threshold: ev.threshold });
+        }
+        if (ev.sources && ev.sources.length) {
+          let src = `<b class="src-title">${SVG.clip}参考来源</b>`;
+          for (const s of ev.sources) src += srcItemHtml(s);
+          html += `<div class="sources">${src}</div>` + metaHtml(ev.meta);
+        }
+        html += `<div class="stream-text streaming">检索中…</div>`;
+        botEl.innerHTML = html;
+        textEl = botEl.querySelector(".stream-text");
+      } else if (ev.type === "delta") {
+        answer += ev.text;
+        textEl.classList.remove("streaming");
+        textEl.innerHTML = renderChatImages(escapeHtml(answer));
+        chatEl.scrollTop = chatEl.scrollHeight;
+      } else if (ev.type === "done") {
+        answer = ev.answer;
+        textEl.classList.remove("streaming");
+        textEl.innerHTML = renderChatImages(escapeHtml(answer));
+        chatEl.scrollTop = chatEl.scrollHeight;
+      } else if (ev.type === "error") {
+        // 流内错误:来源块保留(本身是有效信息),答案区显示错误
+        textEl.classList.remove("streaming");
+        textEl.innerHTML = `${SVG.alert}<span class="stream-error">${escapeHtml(ev.message || "生成失败")}</span>`;
+        botEl.classList.add("msg-error");
+      }
+    }
   }
 }
 $("send").onclick = send;
