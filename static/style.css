@@ -19,6 +19,8 @@
   --notice-bg: #FFF7E8;      /* MinerU 提示暖底 */
   --notice-border: #F0D9A8;
   --notice-text: #7A4E10;
+  --warn-bg: #FBE4B5;         /* 警告态 toast 底(如"全重复上传"友情提示) */
+  --warn-text: #6B3D08;
   /* 圆角 */
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -269,10 +271,72 @@ details summary:hover { color: var(--accent-hover); }
                          margin: 12px auto; border-radius: var(--radius-sm);
                          box-shadow: var(--shadow-sm); }
 
+/* ========== 9.1 重复上传提示模态 ========== */
+/* 沿用 .md-overlay 视觉约定:全屏遮罩 + 居中白底卡片;z-index 高于 loading-mask。 */
+.dup-overlay { display: none; position: fixed; inset: 0; background: rgba(41, 38, 28, .45);
+               z-index: 110; align-items: center; justify-content: center; }
+.dup-overlay.show { display: flex; }
+.dup-box { background: var(--surface); width: min(440px, 92vw);
+           border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+           display: flex; flex-direction: column; overflow: hidden; }
+/* 标题区:左侧暖色圆形背景图标 + 标题文字,右上角关闭 X */
+.dup-box header { padding: 18px 22px 14px; display: flex; align-items: flex-start;
+                  gap: 14px; position: relative; }
+.dup-icon-circle { width: 38px; height: 38px; border-radius: 50%;
+                   background: var(--warn-bg); color: var(--warn-text);
+                   display: grid; place-items: center; flex-shrink: 0; }
+.dup-icon-circle svg { width: 20px; height: 20px; }
+.dup-title-wrap { flex: 1; min-width: 0; padding-top: 3px; }
+.dup-title { font-size: 15.5px; font-weight: 600; color: var(--text);
+             line-height: 1.35; }
+.dup-subtitle { font-size: 12.5px; color: var(--text-secondary);
+                margin-top: 4px; line-height: 1.4; }
+.dup-close { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px;
+             border: 0; background: transparent; color: var(--text-secondary);
+             cursor: pointer; border-radius: var(--radius-sm);
+             display: grid; place-items: center; }
+.dup-close:hover { background: var(--surface-hover); color: var(--text); }
+.dup-close svg { width: 16px; height: 16px; }
+/* 文件名列表:chip 风格(浅暖底胶囊),最多两列 flex wrap */
+.dup-box .dup-body { padding: 4px 22px 18px; max-height: 50vh; overflow: auto; }
+.dup-files { list-style: none; display: flex; flex-wrap: wrap; gap: 7px; }
+.dup-files li { background: var(--bg); color: var(--text); font-size: 12.5px;
+                padding: 5px 11px; border-radius: var(--radius-full);
+                border: 1px solid var(--border); line-height: 1.4;
+                max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }
+.dup-box footer { padding: 12px 22px 16px; display: flex; justify-content: flex-end;
+                  border-top: 1px solid var(--border); }
+.dup-box footer .btn { padding: 9px 22px; font-size: 13.5px; }
+
 /* ========== 10. toast ========== */
+/* 三态:成功(默认深底)/ 警告(暖橙底)/ 错误(红底)。多行文件名列表自然折行,max-width 防溢出。 */
 .toast { position: fixed; right: 24px; top: 24px; padding: 11px 16px;
          background: var(--text); color: var(--bg); border-radius: var(--radius-md);
-         font-size: 13px; box-shadow: var(--shadow-md);
-         opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
+         font-size: 13px; line-height: 1.5; box-shadow: var(--shadow-md);
+         opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99;
+         max-width: 380px; white-space: pre-line; word-break: break-word; }
 .toast.show { opacity: 1; }
+.toast.warn { background: var(--warn-bg); color: var(--warn-text); }
 .toast.err { background: var(--danger); color: #fff; }
+
+/* ========== 10.1 Loading 遮罩(管理页耗时入库时使用) ========== */
+.loading-mask { position: fixed; inset: 0; background: rgba(41, 38, 28, .42);
+                 display: none; align-items: center; justify-content: center;
+                 z-index: 100; pointer-events: auto; }
+.loading-mask.show { display: flex; }
+.loading-card { background: var(--surface); padding: 22px 28px;
+                border-radius: var(--radius-md); box-shadow: var(--shadow-md);
+                display: flex; flex-direction: column; align-items: center; gap: 14px;
+                max-width: 420px; min-width: 240px; }
+.loading-spinner { width: 30px; height: 30px; border-radius: 50%;
+                   border: 3px solid var(--border-strong);
+                   border-top-color: var(--accent);
+                   animation: loading-spin .8s linear infinite; }
+@keyframes loading-spin { to { transform: rotate(360deg); } }
+.loading-text { color: var(--text); font-size: 14px; text-align: center;
+                line-height: 1.5; word-break: break-word; }
+.loading-files { color: var(--text-secondary); font-size: 12.5px;
+                 list-style: none; text-align: left; max-width: 360px; }
+.loading-files li { padding: 2px 0;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

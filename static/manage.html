@@ -75,6 +75,30 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- 重复上传提示模态:全重复场景弹出,用户点「我知道了」或右上角 X 才关闭 -->
+<div class="dup-overlay" id="dupOverlay">
+  <div class="dup-box" role="alertdialog" aria-labelledby="dupTitle">
+    <header>
+      <div class="dup-icon-circle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      </div>
+      <div class="dup-title-wrap">
+        <div class="dup-title" id="dupTitle">以下文件已上传,请勿重复上传</div>
+        <div class="dup-subtitle">请从选择中移除这些文件后重新上传。</div>
+      </div>
+      <button class="dup-close" id="dupClose" aria-label="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="dup-body">
+      <ul class="dup-files" id="dupFiles"></ul>
+    </div>
+    <footer>
+      <button class="btn" id="dupOk">我知道了</button>
+    </footer>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -85,6 +109,56 @@ document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
   document.querySelectorAll(".panel").forEach(p =>
     p.classList.toggle("active", p.id === "panel-" + t.dataset.tab));
   if (t.dataset.tab === "history") refreshHistSessions();
+});
+
+// ---------- Loading 遮罩(复用 DOM,首次创建后只切显隐) ----------
+function showLoading(items) {
+  // 入参兼容 FileList / 字符串数组 / 单个字符串,统一抽 name
+  const names = (items || []).map(it => (it && it.name) || String(it));
+  let mask = document.getElementById("loadingMask");
+  if (!mask) {
+    mask = document.createElement("div");
+    mask.id = "loadingMask";
+    mask.className = "loading-mask";
+    mask.innerHTML = `
+      <div class="loading-card">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">正在入库,请稍候…</div>
+        <ul class="loading-files" id="loadingFiles"></ul>
+      </div>`;
+    document.body.appendChild(mask);
+  }
+  const ul = mask.querySelector("#loadingFiles");
+  // 超过 8 个文件名折叠,避免遮罩过高
+  const shown = names.slice(0, 8);
+  const more = names.length > shown.length ? `<li>等 ${names.length} 个文件</li>` : "";
+  ul.innerHTML = shown.map(n => `<li title="${escapeHtml(n)}">${escapeHtml(n)}</li>`).join("") + more;
+  mask.classList.add("show");
+}
+
+function hideLoading() {
+  const mask = document.getElementById("loadingMask");
+  if (mask) mask.classList.remove("show");
+}
+
+// ---------- 重复上传提示模态:用户必须点"我知道了"才关闭 ----------
+function showDupModal(names) {
+  const ul = $("dupFiles");
+  ul.innerHTML = names.map(n => `<li title="${escapeHtml(n)}">${escapeHtml(n)}</li>`).join("");
+  $("dupOverlay").classList.add("show");
+}
+
+function hideDupModal() {
+  $("dupOverlay").classList.remove("show");
+}
+
+$("dupOk").onclick = hideDupModal;
+$("dupClose").onclick = hideDupModal;
+// 点遮罩空白处也允许关闭(非 destructive action,与 md-overlay 行为一致)
+$("dupOverlay").onclick = e => { if (e.target === e.currentTarget) hideDupModal(); };
+// ESC 键关闭(桌面端键盘交互)
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("dupOverlay").classList.contains("show")) hideDupModal();
 });
 
 // ---------- 上传入库(自首页搬移) ----------
@@ -99,26 +173,48 @@ drop.ondrop = e => {
 };
 fileInput.onchange = e => { if (e.target.files.length) uploadFiles(e.target.files); };
 
+// 前端预检:用户选了文件后,先查已入库列表,任何命中就直接弹模态拦截。
+// 不发起入库请求,避免后端空跑 + Loading 闪现 + 用户等待十几秒白传。
+async function precheckAndFilter(fileArr) {
+  const r = await fetch("/upload/files");
+  if (!r.ok) throw new Error("无法获取已入库文件列表,请刷新页面重试");
+  const data = await r.json();
+  const existing = new Set((data.files || []).map(f => f.name));
+  const dupNames = fileArr.map(f => f.name).filter(n => existing.has(n));
+  return dupNames;
+}
+
 async function uploadFiles(files) {
-  const fd = new FormData();
-  for (const f of files) fd.append("files", f);
-  showToast("上传并入库中...");
+  const fileArr = Array.from(files);
   try {
-    const r = await fetch("/upload/files", { method: "POST", body: fd });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || "上传失败");
-    const skip = (data.skipped_files || []).length;
-    showToast(skip > 0
-      ? `新入库 ${data.chunks_ingested} 个片段,跳过 ${skip} 个重复文件`
-      : `入库 ${data.chunks_ingested} 个片段,共 ${data.total_entities} 条`);
-    refreshFiles();
-  } catch (e) { showToast(e.message, true); }
+    // 前端预检 + 拦截:有任何已上传文件,直接弹模态,不发请求
+    const dupNames = await precheckAndFilter(fileArr);
+    if (dupNames.length > 0) {
+      showDupModal(dupNames);
+      return;
+    }
+    // 全部新增 → 正常上传
+    showLoading(fileArr);
+    try {
+      const fd = new FormData();
+      for (const f of fileArr) fd.append("files", f);
+      const r = await fetch("/upload/files", { method: "POST", body: fd });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || "上传失败");
+      showToast(`✓ 入库 ${data.chunks_ingested} 个片段,共 ${data.total_entities} 条`);
+      refreshFiles();
+    } finally {
+      hideLoading();
+    }
+  } catch (e) {
+    showToast(`✗ 上传失败:${e.message}`, "err");
+  }
 }
 
 $("btnDir").onclick = async () => {
   const path = $("dirpath").value.trim();
-  if (!path) return showToast("请填路径", true);
-  showToast("扫描目录并入库...");
+  if (!path) return showToast("请填路径", "err");
+  showLoading([path]);
   try {
     const r = await fetch("/upload/dir", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -128,10 +224,14 @@ $("btnDir").onclick = async () => {
     if (!r.ok) throw new Error(data.detail || "失败");
     const skip = (data.skipped_files || []).length;
     showToast(skip > 0
-      ? `新入库 ${data.chunks_ingested} 个片段,跳过 ${skip} 个已存在文件`
+      ? `从 ${data.ingested_from} 入库 ${data.chunks_ingested} 个片段,跳过 ${skip} 个已存在文件`
       : `从 ${data.ingested_from} 入库 ${data.chunks_ingested} 个片段`);
     refreshFiles();
-  } catch (e) { showToast(e.message, true); }
+  } catch (e) {
+    showToast(`✗ 扫描失败:${e.message}`, "err");
+  } finally {
+    hideLoading();
+  }
 };
 
 // ---------- 已入库文件列表(name/chunks/has_converted) ----------

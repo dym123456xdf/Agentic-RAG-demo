@@ -19,11 +19,19 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 }
 
-function showToast(msg, isErr) {
+// 三态 toast:成功(默认深底)/ 警告(.warn 暖橙)/ 错误(.err 红)。
+// 兼容旧签名 showToast(msg, true);type 不传时按默认成功 2.2s,
+// type="warn" 默认 5s,type="err" 默认 6s;durationMs 可显式覆盖。
+function showToast(msg, type, durationMs) {
+  if (type === true) type = "err";
+  if (type === false || type === undefined || type === null || type === "") type = "";
+  if (durationMs == null) {
+    durationMs = type === "err" ? 6000 : type === "warn" ? 5000 : 2200;
+  }
   const t = document.getElementById("toast");
   t.textContent = msg;
-  t.className = "toast show" + (isErr ? " err" : "");
-  setTimeout(() => t.className = "toast", 2200);
+  t.className = "toast show" + (type ? " " + type : "");
+  setTimeout(() => t.className = "toast", durationMs);
 }
 
 // ---------- 会话 API ----------
