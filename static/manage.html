@@ -33,12 +33,7 @@
       <div class="drop" id="drop">点击或拖拽文件到这里<br>支持 PDF / Word / PPT / MD / TXT</div>
       <input type="file" id="file" multiple hidden accept=".pdf,.docx,.pptx,.md,.markdown,.txt">
 
-      <h3>索引服务器目录</h3>
-      <div class="dir-row">
-        <input type="text" id="dirpath" placeholder="例如 data/ 或 /abs/path" value="data/">
-        <button class="btn ghost" id="btnDir">扫描并入库</button>
-      </div>
-
+      
       <h3>已入库文件 <span id="fileCount">(0)</span></h3>
       <ul class="file-list" id="fileList"><li class="empty">暂无</li></ul>
       <div class="stat" id="stats">尚未入库</div>
@@ -211,28 +206,6 @@ async function uploadFiles(files) {
   }
 }
 
-$("btnDir").onclick = async () => {
-  const path = $("dirpath").value.trim();
-  if (!path) return showToast("请填路径", "err");
-  showLoading([path]);
-  try {
-    const r = await fetch("/upload/dir", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || "失败");
-    const skip = (data.skipped_files || []).length;
-    showToast(skip > 0
-      ? `从 ${data.ingested_from} 入库 ${data.chunks_ingested} 个片段,跳过 ${skip} 个已存在文件`
-      : `从 ${data.ingested_from} 入库 ${data.chunks_ingested} 个片段`);
-    refreshFiles();
-  } catch (e) {
-    showToast(`✗ 扫描失败:${e.message}`, "err");
-  } finally {
-    hideLoading();
-  }
-};
 
 // ---------- 已入库文件列表(name/chunks/has_converted) ----------
 async function refreshFiles() {

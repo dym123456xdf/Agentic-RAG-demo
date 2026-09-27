@@ -2,7 +2,6 @@
 
 四个端点:
 - POST /upload/files   multipart, 多个文件上传
-- POST /upload/dir     JSON, 指定服务器上的目录路径,递归读
 - GET  /upload/files   列出已入库文件(filename + chunks)
 - DELETE /upload/files/{name}  删除单个已入库文件(Milvus + 磁盘联动)
 - POST /upload/clear   清空 collection(谨慎使用,删全部数据)
@@ -92,28 +91,6 @@ async def upload_files(
             converted.append(str(converted_md_path(p)))
 
     return {"saved": saved, "converted": converted, **result}
-
-
-@router.post("/dir")
-async def upload_dir(payload: dict):
-    """前端传一个服务器能访问到的目录路径(支持 data/ 这种项目内置目录)。
-
-    幂等:同目录内已在库中的文件直接跳过。
-    """
-    path = (payload or {}).get("path", "").strip()
-    if not path:
-        raise HTTPException(400, "需要传 path")
-
-    p = Path(path)
-    if not p.is_absolute():
-        p = Path("/Users/daiyanmei/PycharmProjects/Agentic-RAG-demo") / path
-
-    if not p.exists():
-        raise HTTPException(404, f"路径不存在: {p}")
-
-    pipeline = get_pipeline()
-    result = pipeline.ingest(str(p))
-    return {"ingested_from": str(p), **result}
 
 
 @router.get("/files")

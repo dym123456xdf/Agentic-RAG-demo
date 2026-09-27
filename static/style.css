@@ -205,9 +205,6 @@ details summary:hover { color: var(--accent-hover); }
 .drop:hover, .drop.drag { background: var(--accent-soft); border-color: var(--accent);
                           color: var(--text); }
 
-/* 目录入库输入行 */
-.dir-row { display: flex; gap: 10px; }
-.dir-row input[type=text] { flex: 1; }
 
 /* 已入库文件列表:白/米底卡片行 */
 .file-list { list-style: none; font-size: 13px; }
