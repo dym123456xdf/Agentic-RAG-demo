@@ -1,91 +1,278 @@
-"""RAG 流水线 —— 单一职责:按需求文档的 5 段式把模块串成 query() / query_stream()。
+"""RAG 流水线 —— 单一职责:对外暴露 LangGraph 薄壳,把图包装成 3 个入口函数。
 
-不持有业务逻辑,只装配 + 转发:
-pre_query → retriever → post → generator
+- ingest(task_id, file_path)         入库入口
+- query(question, history, session_id, message_id)            非流式查询
+- query_stream(question, history, session_id, message_id)    流式查询(逐事件 yield)
 
-query_stream 产出事件元组 (事件名, 载荷),供 /chat/stream 路由包 SSE 帧:
-meta -> delta* -> done;检索或生成异常 -> error(与 done 二选一)。
+入口仅做参数封装 + 图驱动,不持有业务逻辑;业务逻辑全在各节点。
 """
 from __future__ import annotations
 
-from typing import Iterator, cast
+import asyncio
+import json
+import queue
+import threading
+from typing import AsyncIterator, Iterator
 
 from app.core.config import Config
-from app.rag.generator import Generator, build_sources
-from app.rag.indexer import build_from_path
-from app.rag.post import PostProcessor
-from app.rag.pre_query import QueryPreProcessor
-from app.rag.retriever import Retriever
+from app.rag.ingest_graph import INGEST_GRAPH
+from app.rag.query_graph import QUERY_GRAPH, RETRIEVAL_GRAPH
+from app.rag.state import create_default_import_state, create_default_query_state
 
 
-class RAGPipeline:
-    """把 5 个 RAG 模块串成端到端 query 接口(非流式 + 流式两个出口)。"""
+# ============== 入库 ==============
 
-    def __init__(self):
-        self._pre = QueryPreProcessor()
-        self._retriever = Retriever()
-        self._post = PostProcessor()
-        self._generator = Generator()
+async def ingest(task_id: str, file_path: str) -> dict:
+    """异步入库入口:file_path 为 MinIO 对象 key(如 "uploads/报告.pdf")。"""
+    state = create_default_import_state(task_id=task_id, import_file_path=file_path)
+    result = await INGEST_GRAPH.ainvoke(state)
+    return {
+        "task_id": result.get("task_id", task_id),
+        "file_title": result.get("file_title", ""),
+        "chunks_ingested": result.get("chunks_ingested", 0),
+        "uploaded_objects": result.get("uploaded_objects", 0),
+    }
 
-    def _retrieve(self, question: str, history: list[dict[str, str]] | None):
-        """前 3 段(预处理 + 召回 + 重排),两个 query 出口共用。"""
-        processed = self._pre.process(question, history)
-        raw_nodes = self._retriever.retrieve(processed)
-        top_nodes = self._post.process(raw_nodes, processed.rewritten)
-        meta = {
-            "intent": processed.intent,
-            "rewritten": processed.rewritten,
-            "expanded": processed.expanded,
-            "raw_count": len(raw_nodes),
-            "after_count": len(top_nodes),
-        }
-        return processed, raw_nodes, top_nodes, meta
 
-    def query(self, question: str, history: list[dict[str, str]] | None = None) -> dict:
-        processed, raw_nodes, top_nodes, meta = self._retrieve(question, history)
-        # 4. 生成
-        result: dict = self._generator.generate(processed.rewritten, top_nodes)
-        # 5. 附上预处理细节,方便前端调试
-        result["meta"] = meta
-        return result
+# ============== 非流式查询 ==============
 
-    def query_stream(self, question: str,
-                     history: list[dict[str, str]] | None = None) -> Iterator[tuple[str, object]]:
-        """流式 query:逐事件 yield,事件顺序 meta -> delta* -> done | error。
+async def query(question: str, history: list[dict] | None,
+                session_id: int | str = 0, message_id: int | str = 0) -> dict:
+    """非流式:跑完整个图后返回 {answer, sources, meta}。
 
-        - meta 载荷: {sources, confidence(top1), low_confidence, threshold, meta}
-          —— 检索+重排一完成就 yield,前端此刻即可渲染参考来源块(感知提速的大头)。
-        - done 载荷:完整答案全文(路由据此落库);error 载荷:错误说明,之后直接 return。
-        """
-        try:
-            processed, raw_nodes, top_nodes, meta = self._retrieve(question, history)
-        except Exception as e:
-            yield "error", f"检索失败: {e}"
-            return
+    异步签名:必须被 await,否则会拿到一个未启动的 coroutine 对象。
+    query_stream() 与 RAGPipeline.query_stream() 仍是同步,因为 SSE 的 event_stream()
+    由 FastAPI 跑在线程池里(无事件循环),可用 asyncio.run 桥接。
+    """
+    state = create_default_query_state(
+        session_id=session_id,
+        message_id=message_id,
+        original_query=question,
+        history=history or [],
+        is_stream=False,
+    )
+    final = await QUERY_GRAPH.ainvoke(state)
+    return _build_response(final)
 
-        # 主证据 = 重排后 top1;sources 已按相关度降序
-        confidence = getattr(top_nodes[0], "confidence", None) if top_nodes else None
-        low_confidence = confidence is not None and confidence < Config.CONFIDENCE_THRESHOLD
-        yield "meta", {
-            "sources": build_sources(top_nodes),
+
+def _build_response(final: dict) -> dict:
+    """从 graph 终态提取 {answer, sources, meta},与旧 pipeline.py 同形。"""
+    docs = final.get("reranked_docs") or []
+    sources = _build_sources(docs)
+    confidence = sources[0]["confidence"] if sources else None
+    low_confidence = confidence is not None and confidence < Config.CONFIDENCE_THRESHOLD
+    return {
+        "answer": final.get("answer", ""),
+        "sources": sources,
+        "meta": {
+            "intent": final.get("intent", ""),
+            "rewritten": final.get("rewritten_query", ""),
+            "raw_count": len(final.get("embedding_chunks") or [])
+                         + len(final.get("hyde_embedding_chunks") or [])
+                         + len(final.get("web_search_docs") or []),
+            "after_count": len(docs),
+            "recall_paths": _recall_paths(final),
             "confidence": confidence,
             "low_confidence": low_confidence,
             "threshold": Config.CONFIDENCE_THRESHOLD,
-            "meta": meta,
+        },
+    }
+
+
+def _build_sources(docs: list[dict]) -> list[dict]:
+    return [
+        {
+            "index": i,
+            "content": (d.get("text") or "").strip()[:300],
+            "score": round(float(d.get("score", 0.0)), 4),
+            "confidence": d.get("confidence"),
+            "source": d.get("doc_name") or "unknown",
+            "source_type": d.get("source_type", "vector"),
         }
+        for i, d in enumerate(docs, 1)
+    ]
 
-        stream, _ = self._generator.generate_stream(processed.rewritten, top_nodes)
-        parts: list[str] = []
+
+def _recall_paths(final: dict) -> list[str]:
+    paths: list[str] = []
+    if final.get("embedding_chunks"):
+        paths.append("dense")
+    if final.get("hyde_embedding_chunks"):
+        paths.append("hyde")
+    if final.get("web_search_docs"):
+        paths.append("web")
+    return paths
+
+
+# ============== 流式查询 ==============
+
+# 节点(图内 key)完成 → 推给前端的阶段文案。agnes 等模型下检索前有多次 LLM 串行调用,
+# 首字前 40s+ 只见"检索中…"会被当成卡死(2026-09-28 实测),按节点推进给阶段反馈
+_STAGE_MSGS = {
+    "preprocess": "理解完成,多路召回中(向量 + HyDE)…",
+    "embedding_search": "向量召回完成…",
+    "hyde_search": "HyDE 召回完成…",
+    "web_search": "Web 检索完成…",
+    "rrf_fuse": "多路融合完成,重排打分中…",
+}
+
+
+def query_stream(question: str, history: list[dict] | None,
+                 session_id: int | str = 0, message_id: int | str = 0,
+                 ) -> Iterator[tuple[str, object]]:
+    """同步流式:yield 事件元组 (event, payload)。
+
+    事件顺序: status* -> meta -> status -> delta* -> done | error
+    - status 载荷:str(阶段提示:理解 / 召回 / 重排 / 生成,前端替换占位文案)
+    - meta 载荷:{sources, confidence, low_confidence, threshold, meta}
+    - delta 载荷:str(已清洗的增量答案文本,think 块已被 ThinkStreamFilter 剥掉)
+    - done 载荷:str(完整答案)
+    - error 载荷:str(错误说明)
+
+    实现说明:llama-index 的 LLM 不发 LangChain 事件,astream_events 拿不到 token 级增量,
+    所以分两段 —— 先跑检索子图(RETRIEVAL_GRAPH,不含 generate)出 meta,再在图外用
+    LLMClient.stream_chat + ThinkStreamFilter 逐块产出 delta。SSE 的 event_stream()
+    由 FastAPI 跑在线程池里(无事件循环),asyncio.run 驱动检索子图即可。
+
+    阶段提示:检索子图改走 astream(stream_mode="updates"),节点一完成就推 status;
+    终态由各节点增量按序 merge 得到(state 是无 reducer 的 TypedDict,merge 与
+    ainvoke 终态一致)。astream 是异步迭代而本函数是同步生成器,用后台线程跑
+    asyncio + queue 把 (event, payload) 递出来。
+    """
+    state = create_default_query_state(
+        session_id=session_id,
+        message_id=message_id,
+        original_query=question,
+        history=history or [],
+        is_stream=True,
+    )
+
+    # 1. 检索子图逐节点推进:status 即时吐,终态最后从队列取
+    evq: queue.Queue = queue.Queue()
+    _EOS = object()  # 结束哨兵
+
+    def _drive() -> None:
+        async def _run() -> dict:
+            merged: dict = {}
+            async for update in RETRIEVAL_GRAPH.astream(state, stream_mode="updates"):
+                for node, delta in (update or {}).items():
+                    if isinstance(delta, dict):
+                        merged.update(delta)
+                    msg = _STAGE_MSGS.get(node)
+                    if merged.get("intent") == "chitchat":
+                        # 闲聊分支:preprocess 一完成就明说跳过检索;rrf/rerank 是空跑,
+                        # 不刷"召回/重排"这类无意义的阶段文案
+                        msg = "闲聊寒暄,跳过知识库检索…" if node == "preprocess" else None
+                    if msg:
+                        evq.put(("status", msg))
+            return merged
+
         try:
-            for chunk in stream:
-                parts.append(chunk)
-                yield "delta", chunk
+            evq.put(("final", asyncio.run(_run())))
         except Exception as e:
-            # 生成阶段不可恢复错误:推 error 收场,半成品答案不进 done(路由据此不落库)
-            yield "error", f"答案生成失败: {e}"
-            return
-        yield "done", "".join(parts)
+            evq.put(("error", f"检索失败: {e}"))
+        finally:
+            evq.put(_EOS)
 
-    def ingest(self, path: str) -> dict:
-        """入库入口,方便路由直接调。"""
-        return cast(dict, build_from_path(path))
+    yield "status", "理解问题中(改写 + 意图识别)…"
+    threading.Thread(target=_drive, daemon=True).start()
+    final: dict | None = None
+    while True:
+        item = evq.get()
+        if item is _EOS:
+            break
+        kind, payload = item
+        if kind == "final":
+            final = payload
+            continue
+        yield kind, payload  # status / error
+        if kind == "error":
+            return
+    if final is None:
+        return
+
+    docs = final.get("reranked_docs") or []
+    sources = _build_sources(docs)
+    confidence = sources[0]["confidence"] if sources else None
+    low_confidence = confidence is not None and confidence < Config.CONFIDENCE_THRESHOLD
+    yield "meta", {
+        "sources": sources,
+        "confidence": confidence,
+        "low_confidence": low_confidence,
+        "threshold": Config.CONFIDENCE_THRESHOLD,
+        "meta": {
+            "intent": final.get("intent", ""),
+            "rewritten": final.get("rewritten_query", ""),
+            "recall_paths": _recall_paths(final),
+        },
+    }
+
+    # 无资料:与 generate 节点的空资料行为保持一致,直接收场(闲聊分支除外 —— 它本来
+    # 就不指望资料,空 docs 是预期,继续走下面的直接对话生成)
+    intent = final.get("intent", "")
+    if not docs and intent != "chitchat":
+        yield "done", "我不知道,资料里没提到。"
+        return
+
+    # 2. 图外流式生成:stream_chat 产增量,ThinkStreamFilter 剥 think 块
+    from app.core.llm import LLMClient, ThinkStreamFilter
+    from app.rag.nodes.query_nodes import NodeGenerate
+
+    yield "status", "回应中…" if intent == "chitchat" else "生成答案中…"
+
+    query = final.get("rewritten_query") or question
+    if intent == "chitchat":
+        messages = NodeGenerate.build_chitchat_messages(query, state.get("history") or [])
+        temperature, max_tokens = 0.5, 300
+    else:
+        messages = NodeGenerate.build_messages(query, docs)
+        temperature, max_tokens = 0.2, 800
+    stream = LLMClient(role="main").stream_chat(messages, temperature=temperature, max_tokens=max_tokens)
+    flt = ThinkStreamFilter()
+    parts: list[str] = []
+    try:
+        for chunk in stream:
+            safe = flt.push(chunk)
+            if safe:
+                parts.append(safe)
+                yield "delta", safe
+        rest = flt.flush()
+        if rest:
+            parts.append(rest)
+            yield "delta", rest
+    except Exception as e:
+        # 生成阶段不可恢复错误:推 error 收场,半成品答案不进 done(路由据此不落库)
+        yield "error", f"答案生成失败: {e}"
+        return
+    yield "done", "".join(parts)
+
+
+# ============== 兼容旧 API(供 chat.py 旧逻辑平滑过渡) ==============
+
+class RAGPipeline:
+    """薄壳:保留旧类名,内部直接调顶层函数,让 upload.py 的 get_pipeline() 不报错。"""
+
+    def __init__(self):
+        pass
+
+    async def query(self, question: str, history: list[dict] | None = None) -> dict:
+        return await query(question, history)
+
+    def query_stream(self, question: str,
+                     history: list[dict] | None = None) -> Iterator[tuple[str, object]]:
+        return query_stream(question, history)
+
+    async def ingest(self, file_path: str) -> dict:
+        import uuid
+        return await ingest(uuid.uuid4().hex, file_path)
+
+
+_pipeline: RAGPipeline | None = None
+
+
+def get_pipeline() -> RAGPipeline:
+    """进程内 pipeline 单例(避免每次请求重载 BGE reranker 与 LangGraph 图)。"""
+    global _pipeline
+    if _pipeline is None:
+        _pipeline = RAGPipeline()
+    return _pipeline

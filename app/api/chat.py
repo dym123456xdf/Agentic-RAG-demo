@@ -2,8 +2,9 @@
 
 两个出口:
 - POST /chat       非流式:等全量答案 + 来源 + meta
-- POST /chat/stream 流式(SSE):meta -> delta* -> done | error 逐事件推,
-  检索一完成就先推 meta(来源可见),答案逐字流出,前端感知延迟大降。
+- POST /chat/stream 流式(SSE):status* -> meta -> status -> delta* -> done | error 逐事件推,
+  检索各节点完成即推 status(阶段提示),检索一完成就推 meta(来源可见),
+  答案逐字流出,前端感知延迟大降。
 
 历史上下文由后端提供:调 pipeline 前从 MySQL 读当前会话最近 6 条消息拼 history,
 前端不再传 history(请求体多余的 history 字段由 Pydantic 默认忽略)。
@@ -19,9 +20,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.api.upload import get_pipeline
 from app.core import db
 from app.core.config import Config
+from app.rag.pipeline import get_pipeline
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -77,7 +78,7 @@ def _resolve(req: ChatRequest) -> tuple[dict, list[dict[str, str]]]:
 async def chat(req: ChatRequest):
     _, history = _resolve(req)
 
-    result = get_pipeline().query(req.question, history)
+    result = await get_pipeline().query(req.question, history)
     sources = result.get("sources") or []
     # 与流式接口落库形态对齐:历史回溯需要 meta 低置信度三字段才能复现前端提示,
     # 否则非流式接口的记录在管理页永远不显示友情提示条(与流式不一致)。
@@ -114,6 +115,8 @@ async def chat_stream(req: ChatRequest):
             if event == "meta":
                 meta_payload = payload  # type: ignore[assignment]
                 frame = {"type": event, **payload}  # type: ignore[misc]
+            elif event == "status":
+                frame = {"type": event, "text": str(payload)}
             elif event == "delta":
                 full_answer += str(payload)
                 frame = {"type": event, "text": str(payload)}

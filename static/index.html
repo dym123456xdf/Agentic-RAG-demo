@@ -130,8 +130,9 @@ $("btnClear").onclick = async () => {
 };
 
 // ---------- 聊天(流式) ----------
-// 发送 -> /chat/stream SSE:meta 事件到达先渲染参考来源块(感知提速),delta 逐块追加答案,
-// done 定格 / error 报错。检索+重排完成前气泡显示"检索中…"占位。
+// 发送 -> /chat/stream SSE:status 事件实时更新阶段文案(理解/召回/重排/生成,慢模型下
+// 首字前 40s+ 只有"检索中…"会像卡死),meta 事件到达渲染低置信度提示并把来源块
+// (top3)攒起来,delta 逐块追加答案,done 定格后把来源块追加在答案末尾 / error 报错。
 async function send() {
   const q = $("q").value.trim();
   if (!q) return;
@@ -165,6 +166,7 @@ async function streamAnswer(question, sessionId) {
   chatEl.appendChild(botEl);
   let textEl = botEl.querySelector(".stream-text");
   let answer = "";
+  let tailHtml = "";  // 来源块 + meta:先攒着,done 后追加到答案末尾
 
   const r = await fetch("/chat/stream", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -193,16 +195,20 @@ async function streamAnswer(question, sessionId) {
       if (!data) continue;
       let ev;
       try { ev = JSON.parse(data); } catch { continue; }
-      if (ev.type === "meta") {
-        // 检索一完成:占位换成来源块(+ 低置信度提示),答案区继续显示检索中
+      if (ev.type === "status") {
+        // 阶段提示:只在答案还没开始流时更新占位文案(保留 streaming 动画)
+        if (!answer) textEl.textContent = ev.text;
+      } else if (ev.type === "meta") {
+        // 检索一完成:低置信度提示置顶;来源块 + meta 攒到 tailHtml,done 后挪到答案末尾
+        // (最多罗列 top3,重排序后前 3 已是全局最相关)
         let html = "";
         if (ev.low_confidence && ev.confidence != null) {
           html += lowConfidenceHtml({ low_confidence: true, confidence: ev.confidence, threshold: ev.threshold });
         }
         if (ev.sources && ev.sources.length) {
           let src = `<b class="src-title">${SVG.clip}参考来源</b>`;
-          for (const s of ev.sources) src += srcItemHtml(s);
-          html += `<div class="sources">${src}</div>` + metaHtml(ev.meta);
+          for (const s of ev.sources.slice(0, 3)) src += srcItemHtml(s);
+          tailHtml = `<div class="sources">${src}</div>` + metaHtml(ev.meta);
         }
         html += `<div class="stream-text streaming">检索中…</div>`;
         botEl.innerHTML = html;
@@ -216,12 +222,15 @@ async function streamAnswer(question, sessionId) {
         answer = ev.answer;
         textEl.classList.remove("streaming");
         textEl.innerHTML = renderChatImages(escapeHtml(answer));
+        // 参考来源放在答案之后
+        botEl.insertAdjacentHTML("beforeend", tailHtml);
         chatEl.scrollTop = chatEl.scrollHeight;
       } else if (ev.type === "error") {
-        // 流内错误:来源块保留(本身是有效信息),答案区显示错误
+        // 流内错误:来源块仍追加在末尾(检索本身是有效信息),答案区显示错误
         textEl.classList.remove("streaming");
         textEl.innerHTML = `${SVG.alert}<span class="stream-error">${escapeHtml(ev.message || "生成失败")}</span>`;
         botEl.classList.add("msg-error");
+        botEl.insertAdjacentHTML("beforeend", tailHtml);
       }
     }
   }

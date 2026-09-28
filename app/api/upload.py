@@ -1,105 +1,97 @@
-"""上传路由 —— 单一职责:接收前端上传的文件 / 文件夹路径,触发入库 + 列已入库文件。
+"""上传路由 —— 单一职责:接收文件上传 → MinIO 落桶 → 触发入库图;列已入库 + 删除 + 清空。
 
 四个端点:
-- POST /upload/files   multipart, 多个文件上传
-- GET  /upload/files   列出已入库文件(filename + chunks)
-- DELETE /upload/files/{name}  删除单个已入库文件(Milvus + 磁盘联动)
-- POST /upload/clear   清空 collection(谨慎使用,删全部数据)
+- POST /upload/files       multipart 多文件上传
+- GET  /upload/files       列出已入库文件(filename + chunks + has_converted)
+- DELETE /upload/files/{name}  联动清除 Milvus + MinIO(原文件 + 转换产物)
+- POST /upload/clear       清空 collection(drop + 重建)
 
-幂等:
-- POST 任意一个入库端点,同名文件已在库中会跳过,不入 Milvus、不消耗 embedding。
+幂等:同名文件已在库中(Milvus doc_name 命中)时后端跳过入库(前端预检之外的第二道
+防线);CLAUDE.md 硬约束「同名文件重传不入库,改内容不会更新索引」由后端兜底保证。
 """
 from __future__ import annotations
 
-import shutil
+import io
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
+from app.core import milvus_hybrid, minio_client
 from app.core.config import Config
-from app.core.milvus_client import get_store
-from app.rag.loader import MINERU_CONVERTIBLE, convert_to_markdown, converted_md_path
-from app.rag.pipeline import RAGPipeline
+from app.rag.pipeline import ingest
+
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
-# 全局 pipeline 单例(进程内复用,避免每次请求都重载 BGE 模型)
-_pipeline: RAGPipeline | None = None
-
-
-def get_pipeline() -> RAGPipeline:
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = RAGPipeline()
-    return _pipeline
-
 
 @router.post("/files")
-async def upload_files(
-    files: list[UploadFile] = File(...),  # noqa: B008
-    convert_only: bool = False,
-):
-    """前端一次拖多个文件过来,落到 uploads/,入库。
+async def upload_files(files: list[UploadFile] = File(...)):  # noqa: B008
+    """前端一次拖多个文件过来 → MinIO uploads/<name> → 触发入库图。
 
-    幂等:同名文件已存在直接跳过,只入库新文件。
+    幂等:同名文件已在库中(Milvus doc_name 命中)则跳过入库、不重复消耗 embedding
+    (CLAUDE.md 硬约束:同名文件重传不入库,改内容不会更新索引);MinIO 原文件仍覆盖为最新。
+    前端预检拦截只是第一道防线,API 层这里是兜底。
     """
     if not files:
         raise HTTPException(400, "没收到文件")
-    if convert_only and not Config.MINERU_ENABLED:
-        raise HTTPException(400, "仅转换模式依赖 MinerU,请先设置 MINERU_ENABLED=true")
 
     saved: list[str] = []
     for f in files:
         ext = Path(f.filename or "").suffix.lower()
         if ext not in Config.ALLOWED_EXTS:
             raise HTTPException(400, f"不支持的文件格式: {ext}({f.filename})")
-
-        # 防路径穿越:只用文件名,不接收子目录路径
         safe_name = Path(f.filename or "unnamed").name
-        target = Config.UPLOAD_DIR / safe_name
-        # 重复上传直接覆盖(后面入库时按文件名去重)
-        with target.open("wb") as out:
-            shutil.copyfileobj(f.file, out)
+        # 防路径穿越
+        if "/" in f.filename or "\\" in f.filename or safe_name != f.filename:
+            raise HTTPException(400, f"非法文件名: {f.filename}")
+
+        data = await f.read()
+        minio_key = f"uploads/{safe_name}"
+        try:
+            minio_client.put_object(minio_key, data, length=len(data))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
         saved.append(safe_name)
 
-    # 仅转换模式:转 Markdown 落盘 converted/ 但不入库,先检查转换质量
-    if convert_only:
-        converted: list[str] = []
-        for name in saved:
-            p = Config.UPLOAD_DIR / name
-            if p.suffix.lower() in MINERU_CONVERTIBLE:
-                converted.append(str(convert_to_markdown(p)))
-            else:
-                # .md/.txt 本身就是可读文本,无需转换,直接返回源文件路径
-                converted.append(str(p))
-        return {
-            "saved": saved,
-            "converted": converted,
-            "ingested": False,
-            "note": "convert_only=true,仅转换未入库;检查 converted/*.md 无误后去掉参数重传即可入库",
-        }
+    # 后端幂等兜底:已在库中的同名文件直接跳过(前端预检之外的路径,如 curl)
+    existing = milvus_hybrid.list_doc_names()
 
-    # 一次入库一批,只跑一次 embedding(对新文件)
-    pipeline = get_pipeline()
-    result = pipeline.ingest(str(Config.UPLOAD_DIR))
-
-    # 汇总本次入库链路中产生 / 复用的 MinerU 产物,方便前端展示 md 路径
-    converted = []
+    # 入库:每个文件独立触发入库图
+    results = []
     for name in saved:
-        p = Config.UPLOAD_DIR / name
-        if p.suffix.lower() in MINERU_CONVERTIBLE and converted_md_path(p).exists():
-            converted.append(str(converted_md_path(p)))
+        if name in existing:
+            results.append({"name": name, "skipped": True})
+            continue
+        try:
+            r = await ingest(task_id=f"upload-{name}", file_path=f"uploads/{name}")
+            results.append({"name": name, **r})
+        except Exception as e:
+            logger.exception(f"[upload] {name} 入库失败")
+            results.append({"name": name, "error": str(e)})
 
-    return {"saved": saved, "converted": converted, **result}
+    chunks_ingested = sum(r.get("chunks_ingested", 0) for r in results if "chunks_ingested" in r)
+    total_entities = milvus_hybrid.list_doc_names()
+    total_chunks = sum(total_entities.values())
+
+    return {
+        "saved": saved,
+        "ingested": [{"name": r.get("name"), "chunks": r.get("chunks_ingested", 0),
+                       "uploaded_objects": r.get("uploaded_objects", 0),
+                       "skipped": r.get("skipped", False),
+                       "error": r.get("error")}
+                      for r in results],
+        "chunks_ingested": chunks_ingested,
+        "total_entities": total_chunks,
+        "total_chunks": total_chunks,
+    }
 
 
 @router.get("/files")
 async def list_files():
-    """列出已入库的文件 + 每个文件的 chunk 数 + 是否有 MinerU 转换产物。
-
-    用于管理页展示 + 入库前的去重判定。
-    """
-    counts = get_store().list_sources()  # {filename: chunk_count}
+    """列出已入库文件 + chunk 数 + 是否有 MinerU 转换产物(MinIO 端判断)。"""
+    counts = milvus_hybrid.list_doc_names()  # {filename: chunk_count}
     files = [
         {
             "name": name,
@@ -108,83 +100,93 @@ async def list_files():
         }
         for name, n in sorted(counts.items())
     ]
-    total_entities = sum(counts.values())
+    total_chunks = sum(counts.values())
     return {
         "files": files,
         "file_count": len(files),
-        "total_chunks": total_entities,
+        "total_chunks": total_chunks,
         "mineru_enabled": Config.MINERU_ENABLED,
     }
 
 
 def _has_converted(name: str) -> bool:
-    """该入库文件是否有对应的 MinerU 转换产物(converted/<stem>/<stem>.md)。"""
+    """该文件是否有对应的 MinerU 转换产物(MinIO `converted/<stem>/<stem>.md`)。"""
     if not Config.MINERU_ENABLED:
         return False
+    from app.rag.loader_compat import MINERU_CONVERTIBLE  # 延迟引入兼容
     if Path(name).suffix.lower() not in MINERU_CONVERTIBLE:
         return False
-    return converted_md_path(Config.UPLOAD_DIR / name).exists()
+    stem = Path(name).stem
+    return minio_client.object_exists(f"converted/{stem}/{stem}.md")
 
 
 @router.delete("/files/{name}")
 async def delete_file(name: str):
-    """删除单个已入库文件:Milvus chunk + uploads/<name> + converted/<stem>/ 三处联动。
+    """三处联动删除:Milvus + MinIO uploads/<name> + MinIO converted/<stem>/ 前缀。
 
-    删除序(Milvus 先行,向量库是真相源):
-    1. name 白名单校验(basename、无 /、后缀在 ALLOWED_EXTS)→ 否则 404
-    2. MilvusStore.delete_source(name) 删 chunk
-    3. 磁盘容错:uploads/<name> 与 converted/<stem>/ 不存在则跳过(支持脏数据清理)
-    4. Milvus 计数 0 且磁盘两侧均无实体 → 404 "不在库中"
-    响应:{deleted, chunks_removed}
+    任一处缺失不报错(支持脏数据清理)。
     """
-    # 防路径穿越:与 /converted/{name} 同一白名单惯例
     safe = Path(name).name
     if safe != name or "/" in name or "\\" in name:
         raise HTTPException(404, "非法文件名")
     if Path(safe).suffix.lower() not in Config.ALLOWED_EXTS:
         raise HTTPException(404, "非法文件名")
 
-    store = get_store()
-    chunks_removed = store.delete_source(safe)
+    chunks_removed = milvus_hybrid.delete_by_doc_name(safe)
 
-    # 磁盘侧容错删除(Milvus 有、磁盘无 的脏数据场景直接跳过)
-    uploaded = Config.UPLOAD_DIR / safe
-    disk_upload_gone = not uploaded.exists()
-    if uploaded.exists():
-        uploaded.unlink()
+    upload_key = f"uploads/{safe}"
+    upload_gone_before = not minio_client.object_exists(upload_key)
+    if not upload_gone_before:
+        minio_client.delete_object(upload_key)
 
-    converted_dir = Config.MINERU_OUTDIR / Path(safe).stem
-    disk_converted_gone = not converted_dir.is_dir()
-    if converted_dir.is_dir():
-        shutil.rmtree(converted_dir, ignore_errors=True)
+    stem = Path(safe).stem
+    converted_prefix = f"converted/{stem}/"
+    converted_gone_before = (
+        not any(
+            minio_client.get_minio_client().list_objects(
+                Config.MINIO_BUCKET, prefix=converted_prefix, recursive=False
+            )
+        )
+    )
+    converted_removed = 0
+    if not converted_gone_before:
+        converted_removed = minio_client.delete_prefix(converted_prefix)
 
-    # 两边都没发生实际删除:Milvus 无此 source 且磁盘无实体 → 该文件"不在库中"
-    if chunks_removed == 0 and disk_upload_gone and disk_converted_gone:
+    if chunks_removed == 0 and upload_gone_before and converted_gone_before:
         raise HTTPException(404, f"不在库中: {safe}")
 
-    print(f"[upload] 删除 {safe}: Milvus {chunks_removed} chunk,"
-          f" uploads={'删' if not disk_upload_gone else '无'},"
-          f" converted={'删' if not disk_converted_gone else '无'}")
+    print(
+        f"[upload] 删除 {safe}: Milvus {chunks_removed} chunk,"
+        f" uploads={'删' if not upload_gone_before else '无'},"
+        f" converted={'删 ' + str(converted_removed) if converted_removed else '无'}"
+    )
     return {"deleted": safe, "chunks_removed": chunks_removed}
+
+
+@router.post("/clear")
+async def clear_all():
+    """清空 collection(drop + 重建空 schema);客户端慎用。"""
+    milvus_hybrid.drop_collection()
+    milvus_hybrid.ensure_collection(dim=Config.EMBEDDING_DIM)
+    return {"cleared": True}
 
 
 @router.get("/converted/{name}")
 async def get_converted(name: str):
-    """读取 MinerU 转换产物 Markdown,供人工核对转换质量。
-
-    入参 name 为原文件名(含后缀,如 `报告.pdf`),经 converted_md_path 定位到
-    converted/<stem>/<stem>.md。
-
-    安全:name 只取 basename 且后缀必须在 MINERU_CONVERTIBLE 白名单内;
-    产物路径由 converted_md_path 拼装(stem 不会再带分隔符),天然限定在
-    MINERU_OUTDIR 内 —— 防路径穿越。
-    """
+    """读取 MinerU 转换产物 md,从 MinIO 流式回放(供人工核对)。"""
     safe = Path(name).name
     if safe != name or "/" in name or "\\" in name:
         raise HTTPException(404, "非法文件名")
+    from app.rag.loader_compat import MINERU_CONVERTIBLE
     if Path(safe).suffix.lower() not in MINERU_CONVERTIBLE:
         raise HTTPException(404, "非法文件名")
-    target = converted_md_path(Config.UPLOAD_DIR / safe)
-    if not target.is_file():
+
+    stem = Path(safe).stem
+    md_key = f"converted/{stem}/{stem}.md"
+    if not minio_client.object_exists(md_key):
         raise HTTPException(404, f"转换产物不存在: {safe}")
-    return {"name": safe, "content": target.read_text(encoding="utf-8", errors="ignore")}
+    # 流式拼接后一次性返回(转换产物 md 通常 KB~MB 级)
+    buf = io.BytesIO()
+    for chunk in minio_client.get_object_stream(md_key):
+        buf.write(chunk)
+    return {"name": safe, "content": buf.getvalue().decode("utf-8", errors="ignore")}
