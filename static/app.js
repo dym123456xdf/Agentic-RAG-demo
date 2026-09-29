@@ -6,6 +6,8 @@ const SVG = {
   file: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>',
   // 回形针(参考来源)
   clip: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+  // 外链(来源跳转链接,stroke 跟随 .src-link 颜色)
+  link: '<svg class="ic link-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>',
   // 问号(历史问答的提问)
   help: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
   // 警告(请求失败)
@@ -83,11 +85,17 @@ function renderChatImages(escaped) {
 
 // 单条参考来源行(首页 / 管理页共用):优先显示 0-1 置信度,旧数据无 confidence 时退回原始 score。
 // 置信度低于阈值时该行加 .low 类(前端按 meta.low_confidence 已由服务端判过,这里只排版)。
+// url 非空时来源名渲染为可点击跳转链接(新标签打开,chat-source-links);缺 / null 时保持纯文本。
 function srcItemHtml(s) {
   const scoreTag = s.confidence != null
     ? `<span class="src-score">置信度=${s.confidence}</span>`
     : (s.score != null ? `<span class="src-score">score=${s.score}</span>` : "");
-  return `<div class="src">[#${s.index}] <b>${escapeHtml(s.source)}</b> ${scoreTag}<br>` +
+  const name = escapeHtml(s.source);
+  // href 走 escapeHtml 防属性逃逸(与图片 alt/src 同规则);外部链接加 rel 防反向 tab 劫持
+  const nameHtml = s.url
+    ? `<a class="src-link" href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${name}${SVG.link}</a>`
+    : `<b>${name}</b>`;
+  return `<div class="src">[#${s.index}] ${nameHtml} ${scoreTag}<br>` +
          `<span class="src-snippet">${escapeHtml(String(s.content).slice(0, 200))}…</span></div>`;
 }
 

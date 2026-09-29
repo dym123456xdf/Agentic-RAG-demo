@@ -127,6 +127,12 @@ input[type=text]::placeholder { color: #7A7565; }
        margin: 6px 0; border-radius: var(--radius-sm); }
 .src-score { float: right; color: var(--text-secondary); }
 .src-snippet { color: var(--text-secondary); }
+/* 来源跳转链接(chat-source-links):颜色随设计令牌,不硬编码内联色;新标签打开由 a 属性承担 */
+.src-link { color: var(--accent); text-decoration: none; display: inline-flex;
+            align-items: center; gap: 3px; font-weight: 600; }
+.src-link:hover { color: var(--accent-hover); text-decoration: underline; }
+.src-link .link-ic { width: 12px; height: 12px; color: var(--accent); }
+.src-link:hover .link-ic { color: var(--accent-hover); }
 .meta { color: var(--text-secondary); font-size: 11.5px; margin-top: 8px; }
 details summary { cursor: pointer; color: var(--accent); font-size: 12.5px;
                   margin-top: 8px; user-select: none; }
@@ -160,6 +166,12 @@ details summary:hover { color: var(--accent-hover); }
 #input-bar { padding: 14px 20px 20px; background: var(--bg);
              border-top: 1px solid var(--border); }
 .input-wrap { max-width: 760px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+/* 搜索模式下拉(输入框左侧);两外部源都不可用时由 JS 整体 display:none */
+.mode-select { display: none; flex-shrink: 0; padding: 9px 12px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full); background: var(--surface); color: var(--text);
+  font-size: 13px; outline: none; cursor: pointer; box-shadow: var(--shadow-sm); }
+.mode-select:focus { border-color: var(--accent); }
+
 #q { flex: 1; padding: 12px 18px; border: 1px solid var(--border-strong);
      border-radius: var(--radius-full); background: var(--surface);
      box-shadow: var(--shadow-sm); font-size: 14px; outline: none;

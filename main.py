@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from app.api import upload, chat, sessions, converted
+from app.api import upload, chat, sessions, converted, config
 from app.core.config import Config
 from app.core import minio_client, milvus_hybrid
 
@@ -41,6 +41,8 @@ app.include_router(chat.router)
 app.include_router(sessions.router)
 # 转换产物代理路由(URL 契约 /converted/<stem>/... 与原本地 mount 完全一致)
 app.include_router(converted.router)
+# 部署级主开关查询(前端搜索模式下拉按可用性过滤选项)
+app.include_router(config.router)
 
 
 @app.on_event("startup")

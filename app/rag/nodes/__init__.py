@@ -20,6 +20,7 @@ from app.rag.nodes.query_nodes import (
     NodePreprocess,
     NodeRrfFuse,
     NodeWebSearch,
+    NodeXhsSearch,
 )
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "NodeEmbeddingSearch",
     "NodeHydeSearch",
     "NodeWebSearch",
+    "NodeXhsSearch",
     "NodeRrfFuse",
     "NodeCliffRerank",
     "NodeGenerate",

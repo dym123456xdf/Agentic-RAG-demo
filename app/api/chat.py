@@ -19,6 +19,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from typing import Literal
 
 from app.core import db
 from app.core.config import Config
@@ -34,6 +35,8 @@ HISTORY_WINDOW = 3  # 与 pre_query.HISTORY_WINDOW 对齐:最近 3 轮(user+assi
 class ChatRequest(BaseModel):
     question: str
     session_id: int
+    # 搜索模式:kb(仅知识库,默认)/ web(联网)/ xhs(小红书)—— 互斥,见 search-mode-selection
+    search_mode: Literal["kb", "web", "xhs"] = "kb"
 
 
 class SourceItem(BaseModel):
@@ -43,6 +46,9 @@ class SourceItem(BaseModel):
     # 0-1 置信度(sigmoid(重排 logit));旧数据 / 未经 post 的节点为 null,前端隐藏
     confidence: float | None
     source: str
+    # 可跳转的原始出处链接:kb = /converted/<stem>/<stem>.md(web/xhs = 原 URL);
+    # 定位信息缺失 / 旧数据为 null,前端不渲染链接
+    url: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -51,10 +57,25 @@ class ChatResponse(BaseModel):
     meta: dict
 
 
+def _check_search_mode(search_mode: str) -> None:
+    """取值合法但对应主开关未启用时拒收(4xx):互斥模式下选了不可用的路等于什么都不查,
+    静默吞掉会答非所问,显式拒收最诚实。前端已按 GET /api/config 过滤,正常用户不会触达。"""
+    if search_mode == "web" and not Config.WEB_SEARCH_ENABLED:
+        raise HTTPException(400, "联网搜索未启用(WEB_SEARCH_ENABLED=false),请选择「仅知识库」或「小红书」")
+    if search_mode == "xhs" and not Config.XHS_MCP_ENABLED:
+        raise HTTPException(400, "小红书搜索未启用(XHS_MCP_ENABLED=false),请选择「仅知识库」或「联网搜索」")
+
+
 def _resolve(req: ChatRequest) -> tuple[dict, list[dict[str, str]]]:
-    """两个出口共用的校验 + 历史读取:会话不存在 404、空问题 400、MySQL 挂 503。"""
+    """两个出口共用的校验 + 历史读取:会话不存在 404、空问题 400、MySQL 挂 503。
+
+    也校验搜索模式可用性:search_mode 取值合法但对应主开关关闭 → 400 拒收。
+    """
     if not req.question.strip():
         raise HTTPException(400, "问题不能为空")
+
+    # 搜索模式可用性(互斥路由下选了不可用的外部源,拒收而非静默空召回)
+    _check_search_mode(req.search_mode)
 
     try:
         session = db.get_session(req.session_id)
@@ -78,7 +99,7 @@ def _resolve(req: ChatRequest) -> tuple[dict, list[dict[str, str]]]:
 async def chat(req: ChatRequest):
     _, history = _resolve(req)
 
-    result = await get_pipeline().query(req.question, history)
+    result = await get_pipeline().query(req.question, history, search_mode=req.search_mode)
     sources = result.get("sources") or []
     # 与流式接口落库形态对齐:历史回溯需要 meta 低置信度三字段才能复现前端提示,
     # 否则非流式接口的记录在管理页永远不显示友情提示条(与流式不一致)。
@@ -111,7 +132,9 @@ async def chat_stream(req: ChatRequest):
     def event_stream():
         meta_payload: dict | None = None
         full_answer = ""
-        for event, payload in get_pipeline().query_stream(req.question, history):
+        for event, payload in get_pipeline().query_stream(
+            req.question, history, search_mode=req.search_mode
+        ):
             if event == "meta":
                 meta_payload = payload  # type: ignore[assignment]
                 frame = {"type": event, **payload}  # type: ignore[misc]

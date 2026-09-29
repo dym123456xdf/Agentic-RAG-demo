@@ -107,6 +107,14 @@ class Config:
     MCP_SERVER_PORT: int = int(os.getenv("MCP_SERVER_PORT", "8765"))
     BRAVE_SEARCH_API_KEY: str = os.getenv("BRAVE_SEARCH_API_KEY", "")
 
+    # ====== 小红书 MCP(外部独立部署服务,Streamable HTTP)======
+    # xiaohongshu-mcp 由用户自行下载二进制 / Docker 部署(默认 :18060/mcp)并扫码登录,
+    # 生命周期与本服务解耦:启动期只校验 URL 非空,不做网络探测,运行期失败降级空路。
+    XHS_MCP_ENABLED: bool = _bool("XHS_MCP_ENABLED", False)
+    XHS_MCP_URL: str = os.getenv("XHS_MCP_URL", "http://127.0.0.1:18060/mcp")
+    XHS_MCP_TOKEN: str = os.getenv("XHS_MCP_TOKEN", "")  # 可选 Bearer;留空不携带鉴权头
+    XHS_SEARCH_LIMIT: int = int(os.getenv("XHS_SEARCH_LIMIT", "5"))
+
     # ====== 特性开关 ======
     # HyDE 假设文档检索启用(factual / explanatory 意图下挂载)
     HYDE_ENABLED: bool = _bool("HYDE_ENABLED", True)
@@ -160,6 +168,12 @@ class Config:
         if cls.WEB_SEARCH_ENABLED and not cls.BRAVE_SEARCH_API_KEY:
             raise RuntimeError(
                 "WEB_SEARCH_ENABLED=true 需要配置 BRAVE_SEARCH_API_KEY(.env)。"
+            )
+        # XHS_MCP_ENABLED=True 时强制要求 URL 非空(服务本体由用户独立部署,
+        # 启动期不做网络探测 —— 只校验配置完整性,运行期失败走节点降级)
+        if cls.XHS_MCP_ENABLED and not cls.XHS_MCP_URL.strip():
+            raise RuntimeError(
+                "XHS_MCP_ENABLED=true 需要配置 XHS_MCP_URL(.env,默认 http://127.0.0.1:18060/mcp)。"
             )
 
     @classmethod

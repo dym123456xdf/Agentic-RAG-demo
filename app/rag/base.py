@@ -9,9 +9,11 @@
 - 查询图节点 → "query.<name>"
 
 同步/异步支持:
-- 默认 process 是同步函数;基类按同步路径包装。
-- 若子类的 process 是协程函数(async def),基类返回一个「可被 LangGraph await 的协程」,
-  内部仍走日志 + 异常包装。LangGraph 对 sync/async node 都原生支持。
+- 基类 __call__ 统一是协程函数(async def)。LangGraph 判定节点是否异步靠
+  inspect.iscoroutinefunction(节点实例的 __call__),故 __call__ 必须是协程,否则
+  异步节点(web_search / xhs_search)的协程不会被 await,报「Expected dict, got coroutine」。
+- 内部分流:子类 process 是 async def → 直接 await;是 sync def → asyncio.to_thread 丢线程池
+  (避免阻塞事件循环,与 LangGraph 对同步节点 to_thread 的语义一致)。
 
 异常设计:
 - 业务异常(自定义 IngestProcessError / QueryProcessError)由 __call__ 抛出后,LangGraph
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
@@ -78,30 +81,28 @@ class BaseNode(ABC, Generic[T]):
     def __init__(self):
         self.logger = logging.getLogger(f"{self.flow}.{self.name}")
 
-    def __call__(self, state: T):
-        """LangGraph 节点调用入口:同步 process 走同步包装,async process 返回协程。
+    async def __call__(self, state: T) -> T:
+        """LangGraph 节点调用入口:统一协程。
 
-        LangGraph 对 sync/async node 都原生支持:返回值是 dict 走同步;返回协程则被 await。
+        为什么 __call__ 必须是协程函数(async def):
+        LangGraph 判定节点是否异步靠 inspect.iscoroutinefunction(节点实例的 __call__),
+        不是看它「返回什么」。若 __call__ 是同步 def 而内部 return 一个未 await 的协程,
+        LangGraph 会把它当成同步节点,在 ainvoke / astream 里拿到裸协程对象当返回值,
+        触发 InvalidUpdateError:「Expected dict, got <coroutine object ...>」。
+        web_search / xhs_search 等 async 节点都会踩中这个坑,故基类统一按协程注册。
+
+        内部分流:
+        - 异步 process(async def):直接 await(保持原生异步,不丢线程池);
+        - 同步 process(sync def):asyncio.to_thread 丢线程池,避免阻塞事件循环
+          (与 LangGraph 对同步节点 to_thread 的既有语义一致)。
+        两者都统一打日志 + 包异常(包成 IngestProcessError / QueryProcessError)。
         """
-        if inspect.iscoroutinefunction(self.process):
-            return self._acall(state)
+        self.logger.info(f"--- {self.name} 开始 ---")
         try:
-            self.logger.info(f"--- {self.name} 开始 ---")
-            result = self.process(state)
-            self.logger.info(f"--- {self.name} 完成 ---")
-            return result
-        except NodeProcessError:
-            raise
-        except Exception as e:
-            self.logger.error(f"{self.name} 失败: {e}")
-            cls = IngestProcessError if self.flow == "ingest" else QueryProcessError
-            raise cls(str(e), self.name, cause=e) from e
-
-    async def _acall(self, state: T) -> T:
-        """异步 process 的包装路径。"""
-        try:
-            self.logger.info(f"--- {self.name} 开始 ---")
-            result = await self.process(state)
+            if inspect.iscoroutinefunction(self.process):
+                result = await self.process(state)
+            else:
+                result = await asyncio.to_thread(self.process, state)
             self.logger.info(f"--- {self.name} 完成 ---")
             return result
         except NodeProcessError:

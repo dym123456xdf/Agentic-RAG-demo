@@ -1,18 +1,24 @@
-"""查询图 7 节点 —— 预处理 → 多路召回 → RRF 融合 → 断崖重排 → 生成。
+"""查询图 8 节点 —— 预处理 → 按搜索模式互斥路由到单类召回 → RRF 融合 → 断崖重排 → 生成。
 
-并发模型:
-- preprocess 之后由 LangGraph conditional_edges 扇出到 embedding_search / hyde_search /
-  web_search 三路并行;HyDE 仅在 intent ∈ {factual, explanatory} 且 HYDE_ENABLED 时挂载,
-  Web 仅在 intent == factual 且 WEB_SEARCH_ENABLED 时挂载。
-- intent == chitchat(寒暄/闲聊)时不走任何召回,直达 cliff_rerank(空跑)→ generate
-  走闲聊分支直接对话 —— 不是所有输入都需要 RAG 检索。
-- 三路汇向 rrf_fuse → cliff_rerank → generate。
-- web_search 节点是异步的(async def process),其它节点同步。
+并发模型(搜索模式互斥路由,2026-09-28 起):
+- preprocess 之后由 LangGraph conditional_edges 按 search_mode 互斥扇出:
+  kb  → embedding_search +(HYDE_ENABLED 且 intent ∈ {factual, explanatory} 时)hyde_search
+  web → web_search(仅此一路)
+  xhs → xhs_search(仅此一路)
+  外部模式(web / xhs)完全不查本地库;kb 模式不发起外部调用。
+- intent == chitchat(寒暄/闲聊)时任何模式都不走任何召回,直达 cliff_rerank(空跑)
+  → generate 走闲聊分支直接对话 —— 不是所有输入都需要 RAG 检索。
+- 挂载路均汇向 rrf_fuse(模式内融合)→ cliff_rerank → generate。
+- web_search 与 xhs_search 是异步节点(async def process),其它节点同步。
   LangGraph 对 sync/async node 都原生支持;BaseNode.__call__ 自动分流。
 
 ⚠️ 节点一律「增量返回」(只返回本节点写入的 key,不要返回整个 state):
   并行扇出的多个节点处于同一 superstep,若都返回完整 state,会对 session_id 等公共 key
   并发写,触发 InvalidUpdateError(LastValue channel 只接受单写者)。
+
+外部召回(web / xhs)的降级语义:
+- 节点内全捕异常 → 空 docs + warning 日志,图继续;按空召回走重排与生成,
+  答案如实说「不知道」,不编造(BaseNode 包装只用于本路失败不该终止整图)。
 
 流式说明:llama-index 的 LLMClient 不发 LangChain 事件,astream_events 拿不到 token 级
 增量 —— 流式由 pipeline.query_stream 跑「检索子图」后在图外用 LLMClient.stream_chat 产出,
@@ -20,6 +26,7 @@ generate 节点只服务非流式整图路径。
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 
@@ -30,6 +37,10 @@ from app.core.config import Config
 from app.core.llm import LLMClient
 from app.rag.base import BaseNode, QueryProcessError
 from app.rag.state import QueryGraphState
+
+# 小红书 MCP 调用超时上限(秒):无头浏览器搜索可能耗时数十秒;
+# 低于常见 SSE 代理空闲超时,超时与其它异常同路降级空路(design D2)。
+_XHS_TIMEOUT_S = 60
 
 
 # ========== NodePreprocess ==========
@@ -137,7 +148,8 @@ class NodeHydeSearch(BaseNode[QueryGraphState]):
 class NodeWebSearch(BaseNode[QueryGraphState]):
     """MCP Web 搜索:stdio 拉起 python -m mcp_server,调 web_search 工具。
 
-    异步节点:LangGraph ainvoke / astream 会 await 此协程,BaseNode._acall 统一打日志 + 包异常。
+    异步节点:process 是 async def,基类 __call__(协程)直接 await 它;LangGraph ainvoke /
+    astream 会在事件循环内 await,不阻塞。
     """
     name = "web_search"
     flow = "query"
@@ -166,20 +178,107 @@ class NodeWebSearch(BaseNode[QueryGraphState]):
         ]}
 
 
+# ========== NodeXhsSearch ==========
+
+def _normalize_xhs_item(it: dict) -> dict | None:
+    """把 search_feeds 返回的单条 feed 规范化为与 Web 召回同形的文档。
+
+    防御性字段提取(design D4):字段名以实测为准,逐字段 fallback。
+    实测结构(feed item):{id, xsecToken, modelType, noteCard:{displayTitle, desc?, user{nickname}, ...}}
+    - text:   标题 + 摘要(desc 若有)
+    - doc_name: 标题
+    - file_dir: https://www.xiaohongshu.com/explore/<id>
+    - metadata: source_type=xhs + feed_id + xsec_token(token 留给未来详情补全)
+    返回 None 表示该条无效(无 id / 无标题),调用方跳过。
+    """
+    fid = it.get("id") or it.get("note_id") or ""
+    if not fid:
+        return None
+    card = it.get("noteCard") or {}
+    title = (card.get("displayTitle") or card.get("title") or it.get("title") or "").strip()
+    desc = (card.get("desc") or it.get("desc") or "").strip()
+    if not title:
+        return None
+    text = f"{title} {desc}".strip()
+    url = f"https://www.xiaohongshu.com/explore/{fid}"
+    metadata = {
+        "source_type": "xhs",
+        "feed_id": fid,
+        "xsec_token": it.get("xsecToken") or it.get("xsec_token") or "",
+        "author": (card.get("user") or {}).get("nickname") or (card.get("user") or {}).get("nickName") or "",
+    }
+    return {
+        "text": text,
+        "doc_name": title,
+        "file_dir": url,
+        "chunk_idx": 0,
+        "metadata": metadata,
+        "score": 1.0,
+        "source_type": "xhs",
+    }
+
+
+class NodeXhsSearch(BaseNode[QueryGraphState]):
+    """小红书 MCP 召回:Streamable HTTP 调外部 xiaohongshu-mcp 的 search_feeds 工具。
+
+    仅在 search_mode == "xhs" 且 XHS_MCP_ENABLED 时挂载,与查询意图无关(用户显式选择
+    优先)。异步节点:调 mcp_client.call_tool_http(每次独立建连),asyncio.wait_for 60s
+    兜底(design D2)。节点内全捕异常 → 空 xhs_search_docs + warning,图继续(降级空路,
+    不阻断整图,不编造答案)——与 NodeWebSearch 同款语义。
+    """
+    name = "xhs_search"
+    flow = "query"
+
+    async def process(self, state: QueryGraphState) -> QueryGraphState:
+        query = state.get("rewritten_query", "")
+        if not query:
+            return {"xhs_search_docs": []}
+        # 取鉴权头(可选 Bearer;未配置则不携带)
+        headers = None
+        if Config.XHS_MCP_TOKEN:
+            headers = {"Authorization": f"Bearer {Config.XHS_MCP_TOKEN}"}
+        try:
+            raw = await asyncio.wait_for(
+                mcp_client.call_tool_http(
+                    Config.XHS_MCP_URL, "search_feeds", {"keyword": query}, headers=headers,
+                ),
+                timeout=_XHS_TIMEOUT_S,
+            )
+        except Exception as e:
+            self.logger.warning(f"xhs_search 失败: {e};降级为空(服务未启动/登录态失效/超时)")
+            return {"xhs_search_docs": []}
+        # 防御性提取:search_feeds 返回 {"feeds": [...], "count": N}
+        feeds = raw.get("feeds", []) if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+        docs = [d for d in (_normalize_xhs_item(it) for it in feeds[:Config.XHS_SEARCH_LIMIT]) if d]
+        # 增量返回:只写本路 key(与 embedding/hyde/web 互斥,不会同时并行)
+        return {"xhs_search_docs": docs}
+
+
 # ========== NodeRrfFuse ==========
 
 class NodeRrfFuse(BaseNode[QueryGraphState]):
-    """RRF 倒数排名融合:三路等权,k=60,doc_id 用 Milvus id 或 text hash。"""
+    """RRF 倒数排名融合(模式内):只融合当前搜索模式挂载的各路,等权 k=60。
+
+    搜索模式互斥后,任一时刻至多两路同时有结果(kb → embedding + hyde),
+    web / xhs 为单路(退化为按原顺序的重排)。按 search_mode 取路径表,不再三路同框。
+    """
     name = "rrf_fuse"
     flow = "query"
 
-    RR_WEIGHTS = {"embedding": 1.0, "hyde": 1.0, "web": 1.0}
+    RR_WEIGHTS = {"embedding": 1.0, "hyde": 1.0, "web": 1.0, "xhs": 1.0}
+
+    # 模式 → 该模式下挂载的召回路(key: 路径名 / value: 状态字段名)
+    _PATHS_BY_MODE: dict[str, dict[str, str]] = {
+        "kb": {"embedding": "embedding_chunks", "hyde": "hyde_embedding_chunks"},
+        "web": {"web": "web_search_docs"},
+        "xhs": {"xhs": "xhs_search_docs"},
+    }
 
     def process(self, state: QueryGraphState) -> QueryGraphState:
+        mode = state.get("search_mode", "kb")
+        path_map = self._PATHS_BY_MODE.get(mode, self._PATHS_BY_MODE["kb"])
         paths: dict[str, list[dict]] = {
-            "embedding": state.get("embedding_chunks") or [],
-            "hyde": state.get("hyde_embedding_chunks") or [],
-            "web": state.get("web_search_docs") or [],
+            p: (state.get(field) or []) for p, field in path_map.items()
         }
         scores: dict[str, float] = {}
         docs: dict[str, dict] = {}
@@ -206,12 +305,15 @@ class NodeRrfFuse(BaseNode[QueryGraphState]):
 
 
 def _doc_id_of(item: dict) -> str:
-    """给 item 一个稳定 doc_id:web 文档用 url,向量文档用 Milvus id 或 text hash。"""
+    """给 item 一个稳定 doc_id:web 文档用 url,xhs 用笔记链接,向量文档用 Milvus id 或 text hash。"""
     if item.get("id"):
         return str(item["id"])
     text = item.get("text", "")
-    if item.get("source_type") == "web" and item.get("file_dir"):
+    st = item.get("source_type")
+    if st == "web" and item.get("file_dir"):
         return f"web::{item['file_dir']}"
+    if st == "xhs" and item.get("file_dir"):
+        return f"xhs::{item['file_dir']}"
     return hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
 
 
@@ -389,18 +491,29 @@ class NodeGenerate(BaseNode[QueryGraphState]):
 
 # 供 LangGraph 图装配使用
 def route_after_preprocess(state: QueryGraphState) -> list[str]:
-    """preprocess 节点之后,根据意图 + 配置返回要走的下游节点名列表。
+    """preprocess 节点之后,按搜索模式 + 意图 + 开关互斥地返回要走的下游节点名列表。
 
-    LangGraph 会按列表并行调度;空路径仍能让 rrf_fuse 正常执行(空路直接被 RRF 跳过)。
-    chitchat(寒暄/闲聊)直接跳到 cliff_rerank:三路召回全不走(省向量检索 + HyDE 的
-    LLM 往返),cliff_rerank 对空输入是 no-op,汇合后 generate 走闲聊分支直接对话。
+    语义(design D5/D6,搜索模式互斥路由):
+    - chitchat(寒暄/闲聊)在任何模式下都直达 cliff_rerank:全部召回路跳过(省向量检索 +
+      HyDE / 外部调用),cliff_rerank 对空输入是 no-op,汇合后 generate 走闲聊分支直接对话。
+    - 其余意图按 search_mode 互斥挂载:
+        kb  → embedding_search +(HYDE_ENABLED 且 intent ∈ {factual, explanatory} 时)hyde_search
+        web → 仅 web_search
+        xhs → 仅 xhs_search
+    外部模式(web / xhs)完全不查本地库;kb 模式不发起外部调用。外部路不因意图被拦截
+    (用户显式选择优先),HyDE 的意图规则保留在 kb 模式内(它是向量检索的质量增强)。
+    非法 search_mode 回退 kb(防御:API 层已拒收,这里是兜底)。
     """
     intent = state.get("intent", "factual")
     if intent == "chitchat":
         return ["cliff_rerank"]
+    mode = state.get("search_mode", "kb")
+    if mode == "web":
+        return ["web_search"]
+    if mode == "xhs":
+        return ["xhs_search"]
+    # kb(默认 / 未知值兜底):向量 + 按现行规则的 HyDE
     targets = ["embedding_search"]
     if Config.HYDE_ENABLED and intent in ("factual", "explanatory"):
         targets.append("hyde_search")
-    if Config.WEB_SEARCH_ENABLED and intent == "factual":
-        targets.append("web_search")
     return targets

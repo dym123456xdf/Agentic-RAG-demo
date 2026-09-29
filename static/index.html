@@ -32,6 +32,11 @@
   </div>
   <div id="input-bar">
     <div class="input-wrap">
+      <select id="search-mode" class="mode-select" title="搜索模式" aria-label="搜索模式">
+        <option value="kb">仅知识库</option>
+        <option value="web">联网搜索</option>
+        <option value="xhs">小红书</option>
+      </select>
       <input id="q" placeholder="向你的知识库提问…" autocomplete="off">
       <button id="send" title="发送" aria-label="发送"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg></button>
     </div>
@@ -170,7 +175,7 @@ async function streamAnswer(question, sessionId) {
 
   const r = await fetch("/chat/stream", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, session_id: sessionId }),
+    body: JSON.stringify({ question, session_id: sessionId, search_mode: currentSearchMode() }),
   });
   if (!r.ok || !r.body) {
     let detail = `请求失败(${r.status})`;
@@ -237,6 +242,41 @@ async function streamAnswer(question, sessionId) {
 }
 $("send").onclick = send;
 $("q").onkeydown = e => { if (e.key === "Enter") send(); };
+
+// ---------- 搜索模式下拉(kb / web / xhs) ----------
+// 默认 CSS display:none,拉取 /api/config 确认有外部源可用时才显示(避免闪现)。
+// 选项按部署可用性过滤:源不可用隐藏对应项;两外部源均不可用整体隐藏(回落到无此控件的现状)。
+// 选择存 localStorage["search_mode"],刷新恢复(恢复值不可用回落 kb);提交时随请求体发送。
+async function initSearchModeSelector() {
+  const sel = $("search-mode");
+  const opts = { kb: sel.querySelector('option[value="kb"]'),
+                 web: sel.querySelector('option[value="web"]'),
+                 xhs: sel.querySelector('option[value="xhs"]') };
+  let cfg = { web_search_enabled: false, xhs_enabled: false };
+  try {
+    const r = await fetch("/api/config");
+    if (r.ok) cfg = await r.json();
+  } catch { /* /api/config 不可达:两外部源都按不可用处理,下拉隐藏 */ }
+
+  // 按可用性增删外部选项(kb 恒在)
+  if (!cfg.web_search_enabled) opts.web.remove();
+  if (!cfg.xhs_enabled) opts.xhs.remove();
+  if (!cfg.web_search_enabled && !cfg.xhs_enabled) {
+    sel.style.display = "none";  // 两外部源均不可用:整体隐藏
+    return;
+  }
+  sel.style.display = "block";  // 显式 block(CSS 默认 none,空串会回落隐藏)
+
+  // 恢复上次选择;不可用 / 不存在则回落仅知识库
+  const saved = localStorage.getItem("search_mode");
+  sel.value = (saved && sel.querySelector(`option[value="${saved}"]`)) ? saved : "kb";
+  sel.onchange = () => localStorage.setItem("search_mode", sel.value);
+}
+function currentSearchMode() {
+  const sel = $("search-mode");
+  return sel.style.display === "none" ? "kb" : (sel.value || "kb");
+}
+initSearchModeSelector();
 
 // ---------- 启动 ----------
 fetch("/docs").then(r => {

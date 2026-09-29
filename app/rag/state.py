@@ -72,12 +72,15 @@ class QueryGraphState(TypedDict, total=False):
     original_query: str
     rewritten_query: str
     intent: str  # factual / explanatory / comparison / creative / chitchat
+    # 搜索模式(kb / web / xhs)—— 互斥决定查询图挂载哪一路召回,缺省 kb
+    search_mode: str
     # 商品 / 主题上下文(可选)
     item_name: str
     # 多路召回结果
     embedding_chunks: list[dict]        # 向量召回
     hyde_embedding_chunks: list[dict]   # HyDE 召回
     web_search_docs: list[dict]         # Web 召回
+    xhs_search_docs: list[dict]         # 小红书召回(仅本轮可见,不入库)
     # 融合 + 重排
     rrf_chunks: list[dict]
     reranked_docs: list[dict]
@@ -95,10 +98,12 @@ _QUERY_DEFAULT: QueryGraphState = {
     "original_query": "",
     "rewritten_query": "",
     "intent": "factual",
+    "search_mode": "kb",
     "item_name": "",
     "embedding_chunks": [],
     "hyde_embedding_chunks": [],
     "web_search_docs": [],
+    "xhs_search_docs": [],
     "rrf_chunks": [],
     "reranked_docs": [],
     "prompt": "",
